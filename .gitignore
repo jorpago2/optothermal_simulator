@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.vite/
+coverage/
+playwright-report/
+test-results/
+tests/artifacts/
+*.log
+*.tsbuildinfo
+rust/**/target/
+src/wasm/optothermal_core.wasm
+.cargo-local/
+.rustup-local/
