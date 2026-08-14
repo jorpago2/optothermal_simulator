@@ -22,6 +22,15 @@ test("configuration shell remains usable across Carbon breakpoints", async ({ pa
     await expect(page.getByRole("heading", { name: "Single-position model" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Run simulation" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Optical and phase model" })).toHaveAttribute("aria-expanded", "false");
+    if (viewport.width === 320) {
+      const panel = page.locator(".scientific-workbench__panel");
+      const panelBody = page.locator(".scientific-task-panel__body");
+      await panelBody.hover();
+      await page.mouse.wheel(0, 400);
+      await page.waitForTimeout(100);
+      expect(await panelBody.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      expect(await panel.evaluate((element) => element.scrollTop)).toBe(0);
+    }
     const fit = await page.evaluate(() => ({
       viewport: document.documentElement.clientWidth,
       content: document.documentElement.scrollWidth,
@@ -61,7 +70,9 @@ test("all result panels remain reachable on a narrow mobile stage", async ({ pag
   expect(titleBounds?.y ?? 0).toBeGreaterThanOrEqual(stageBounds?.y ?? 0);
   await page.screenshot({ path: "tests/artifacts/small-mobile-results.png" });
   expect(await stage.evaluate((element) => element.scrollHeight)).toBeGreaterThan(await stage.evaluate((element) => element.clientHeight));
-  await stage.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
+  await stage.hover();
+  await page.mouse.wheel(0, 4000);
+  await page.waitForTimeout(100);
   await expect(page.getByRole("heading", { name: "Peak near-surface temperature" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });

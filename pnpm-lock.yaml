@@ -15,8 +15,8 @@ importers:
         specifier: 6.4.1
         version: 6.4.1
       '@jorpago2/scientific-ui':
-        specifier: file:vendor/jorpago2-scientific-ui-0.14.5.tgz
-        version: file:vendor/jorpago2-scientific-ui-0.14.5.tgz(@carbon/react@1.113.0(react-dom@19.2.8(react@19.2.8))(react-is@18.3.1)(react@19.2.8)(sass@1.102.0))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: file:vendor/jorpago2-scientific-ui-0.14.6.tgz
+        version: file:vendor/jorpago2-scientific-ui-0.14.6.tgz(@carbon/react@1.113.0(react-dom@19.2.8(react@19.2.8))(react-is@18.3.1)(react@19.2.8)(sass@1.102.0))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       plotly.js-cartesian-dist-min:
         specifier: 3.7.0
         version: 3.7.0
@@ -332,9 +332,9 @@ packages:
   '@internationalized/number@3.6.7':
     resolution: {integrity: sha512-3ji1fcrT+FPAK86UqEhB/psHixYo6niWPJtt7+qRaYFynt/BaJG8GhAPimtWUpEiVSTq8ZM8L5psMxGquiB/Vg==}
 
-  '@jorpago2/scientific-ui@file:vendor/jorpago2-scientific-ui-0.14.5.tgz':
-    resolution: {integrity: sha512-s/ngDkcgshsqU1+cqlihOZ36i5aN2rdWMdLRrQMahUJ16Chq4RFIulAI/rGYBa0cAyvQ8el3V69J7owfnhBAhg==, tarball: file:vendor/jorpago2-scientific-ui-0.14.5.tgz}
-    version: 0.14.5
+  '@jorpago2/scientific-ui@file:vendor/jorpago2-scientific-ui-0.14.6.tgz':
+    resolution: {integrity: sha512-FNIyLzgok1YXR4QlLgNlkaJx5O/2W9A/OfRghi+0Q8hymycWwP3oAucw0RGzdVbdSGYcL3HeyytIeyr7zr9Bnw==, tarball: file:vendor/jorpago2-scientific-ui-0.14.6.tgz}
+    version: 0.14.6
     engines: {node: '>=24'}
     peerDependencies:
       '@carbon/react': 1.113.x
@@ -1298,7 +1298,7 @@ snapshots:
     dependencies:
       '@swc/helpers': 0.5.23
 
-  '@jorpago2/scientific-ui@file:vendor/jorpago2-scientific-ui-0.14.5.tgz(@carbon/react@1.113.0(react-dom@19.2.8(react@19.2.8))(react-is@18.3.1)(react@19.2.8)(sass@1.102.0))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@jorpago2/scientific-ui@file:vendor/jorpago2-scientific-ui-0.14.6.tgz(@carbon/react@1.113.0(react-dom@19.2.8(react@19.2.8))(react-is@18.3.1)(react@19.2.8)(sass@1.102.0))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
       '@carbon/icons-react': 11.85.0(react@19.2.8)
       '@carbon/react': 1.113.0(react-dom@19.2.8(react@19.2.8))(react-is@18.3.1)(react@19.2.8)(sass@1.102.0)
