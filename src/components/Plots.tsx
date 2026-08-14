@@ -10,7 +10,11 @@ import {
 } from "@jorpago2/scientific-ui";
 import type { OptothermalResult } from "../solver/types";
 
-const plotConfig = createScientificPlotlyConfig({ filename: "optothermal-result", scrollZoom: false }) as Partial<Plotly.Config>;
+const plotConfig = createScientificPlotlyConfig({
+  filename: "optothermal-result",
+  scrollZoom: false,
+  removeButtons: ["zoomIn2d", "zoomOut2d", "autoScale2d"],
+}) as Partial<Plotly.Config>;
 
 function usePlot(
   ref: React.RefObject<HTMLDivElement | null>,
@@ -68,6 +72,7 @@ export function PhaseTransientPlot({ result }: { result: OptothermalResult }) {
     xaxis: { title: { text: "Time (ns)" } },
     yaxis: { title: { text: "Metallic fraction" }, range: [0, 1] },
     yaxis2: { title: { text: "Absorptance" }, overlaying: "y", side: "right", range: [0, 1] },
+    showlegend: false,
   }, [result]);
   return <ScientificPlotFrame title="Material response" description="Thermal VO₂ state and corresponding thin-film absorptance." legend={[{ id: "phase", label: "Metallic fraction", color: "#0072b2" }, { id: "absorption", label: "Absorptance", color: "#009e73" }]}><div ref={ref} className="plot-surface scientific-plot-surface" role="img" aria-label="VO2 metallic fraction and absorptance versus time" /></ScientificPlotFrame>;
 }
@@ -90,6 +95,7 @@ export function RadialTemperaturePlot({ result }: { result: OptothermalResult })
     legend: { orientation: "h", x: 0, y: 1.16 },
     xaxis: { title: { text: "Radius (µm)" } },
     yaxis: { title: { text: "Film temperature (°C)" } },
+    showlegend: false,
   }, [result]);
   return <ScientificPlotFrame title="Radial film profile" description="Peak and final surface temperature across the axisymmetric domain." legend={[{ id: "peak", label: "Peak", color: "#d55e00" }, { id: "final", label: "Final", color: "#0072b2" }]}><div ref={ref} className="plot-surface scientific-plot-surface" role="img" aria-label="Radial peak and final VO2 film temperature" /></ScientificPlotFrame>;
 }
@@ -97,6 +103,8 @@ export function RadialTemperaturePlot({ result }: { result: OptothermalResult })
 export function TemperatureMapPlot({ result, view }: { result: OptothermalResult; view: "peak" | "final" }) {
   const ref = useRef<HTMLDivElement>(null);
   const values = view === "peak" ? result.peakTemperatureMapC : result.finalTemperatureMapC;
+  const visibleDepthUm = Math.min(4, Math.abs(result.depthUm[0] ?? 0));
+  const surfaceUm = result.depthUm.at(-1) ?? 0;
   usePlot(ref, [{
     type: "heatmap",
     x: result.radiusUm,
@@ -108,7 +116,8 @@ export function TemperatureMapPlot({ result, view }: { result: OptothermalResult
   }], {
     margin: { l: 72, r: 68, t: 20, b: 56 },
     xaxis: { title: { text: "Radius (µm)" } },
-    yaxis: { title: { text: "Depth z (µm)" } },
+    yaxis: { title: { text: "Depth z (µm)" }, range: [-visibleDepthUm, surfaceUm] },
+    showlegend: false,
   }, [result, view]);
-  return <ScientificPlotFrame title={`${view === "peak" ? "Peak" : "Final"} r–z temperature`} description="Axisymmetric temperature field; z = 0 is the film–substrate interface." status="Absolute temperature"><div ref={ref} className="plot-surface plot-surface--map scientific-plot-surface" role="img" aria-label={`${view} axisymmetric temperature map`} /></ScientificPlotFrame>;
+  return <ScientificPlotFrame title={`${view === "peak" ? "Peak" : "Final"} near-surface temperature`} description="Axisymmetric field near the film–substrate interface at z = 0." status={`Top ${visibleDepthUm.toPrecision(2)} µm of the substrate`}><div ref={ref} className="plot-surface plot-surface--map scientific-plot-surface" role="img" aria-label={`${view} near-surface axisymmetric temperature map`} /></ScientificPlotFrame>;
 }

@@ -40,10 +40,11 @@ const geometryFields: FieldDefinition[] = [
   { key: "filmThicknessNm", label: "VO₂ thickness", unit: "nm", min: 5, max: 5000 },
   { key: "substrateDepthUm", label: "Modelled substrate depth", unit: "µm", min: 0.1, max: 1000 },
   { key: "radiusUm", label: "Radial domain", unit: "µm", min: 2, max: 5000, helperText: "Use at least four beam waists." },
-  { key: "ambientC", label: "Ambient temperature", unit: "°C", min: -100, max: 500 },
 ];
 
 const opticalFields: FieldDefinition[] = [
+  { key: "substrateIndex", label: "Substrate refractive index", min: 0.01, max: 20 },
+  { key: "airIndex", label: "Surrounding refractive index", min: 0.01, max: 20 },
   { key: "insulatingN", label: "Insulating n", min: 0.01, max: 20 },
   { key: "insulatingK", label: "Insulating k", min: 1e-8, max: 20 },
   { key: "metallicN", label: "Metallic n", min: 0.01, max: 20 },
@@ -55,6 +56,7 @@ const opticalFields: FieldDefinition[] = [
 ];
 
 const thermalFields: FieldDefinition[] = [
+  { key: "ambientC", label: "Ambient temperature", unit: "°C", min: -100, max: 500 },
   { key: "filmDensityKgM3", label: "VO₂ density", unit: "kg/m³", min: 1, max: 3e4 },
   { key: "filmHeatCapacityJKgK", label: "VO₂ heat capacity", unit: "J/(kg·K)", min: 1, max: 1e5 },
   { key: "filmConductivityWMK", label: "VO₂ conductivity", unit: "W/(m·K)", min: 0.001, max: 1e4 },
@@ -121,19 +123,19 @@ export function ConfigurationPanel({ config, issues, busy, onChange, onReset, on
         </ScientificPanelFooter>
       )}
     >
-      <ScientificParameterSection title="Pulse and beam" description="Gaussian pulse evaluated at the beam waist; no axial sweep is performed." columns={2}>
+      <ScientificParameterSection title="Pulse and beam" description="Gaussian pulse evaluated at the beam waist; no axial sweep is performed." columns={1}>
         <Fields definitions={beamFields} config={config} issues={issues} onChange={onChange} />
       </ScientificParameterSection>
-      <ScientificParameterSection title="Geometry" columns={2}>
+      <ScientificParameterSection title="Geometry" columns={1}>
         <Fields definitions={geometryFields} config={config} issues={issues} onChange={onChange} />
       </ScientificParameterSection>
-      <ScientificParameterSection title="VO₂ optical state" description="Reference values are sample-dependent and should be replaced by measured ellipsometry." columns={2} collapsible>
+      <ScientificParameterSection title="Optical and phase model" description="Reference values are sample-dependent and should be replaced by measured ellipsometry." columns={1} collapsible defaultOpen={false}>
         <Fields definitions={opticalFields} config={config} issues={issues} onChange={onChange} />
       </ScientificParameterSection>
-      <ScientificParameterSection title="Thermal properties" columns={2} collapsible defaultOpen={false}>
+      <ScientificParameterSection title="Thermal properties" columns={1} collapsible defaultOpen={false}>
         <Fields definitions={thermalFields} config={config} issues={issues} onChange={onChange} />
       </ScientificParameterSection>
-      <ScientificParameterSection title="Numerical mesh" description="The implicit solver is stable for large steps, but the pulse still requires temporal resolution." columns={2} collapsible>
+      <ScientificParameterSection title="Numerical mesh" description="The implicit solver is stable for large steps, but the pulse still requires temporal resolution." columns={1} collapsible defaultOpen={false}>
         <Fields definitions={numericalFields} config={config} issues={issues} onChange={onChange} />
       </ScientificParameterSection>
       {messages.length > 0 && <ValidationSummary heading="Input review" messages={messages} />}

@@ -1,9 +1,13 @@
+/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4 */
+/* Hallmark · genre: modern-minimal · macrostructure: Workbench · design-system: design.md · designed-as-app · contrast: pass (40–41) · nav: scientific workbench · footer: none · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
+
 :root {
   color-scheme: light;
 }
 
 html {
   scroll-padding-top: 3rem;
+  overflow-x: clip;
 }
 
 html,
@@ -14,10 +18,10 @@ body,
 }
 
 body {
-  overflow-x: hidden;
+  overflow-x: clip;
   background: var(--cds-background);
   color: var(--cds-text-primary);
-  font-family: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--scientific-ui-font-sans, "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif);
 }
 
 .optothermal-visually-hidden {
@@ -45,16 +49,25 @@ textarea {
   background: var(--cds-background);
 }
 
-.configuration-context {
-  max-width: 58rem;
-  padding: var(--cds-spacing-07);
-}
-
 .stage-title {
+  min-width: 0;
   margin: 0;
+  overflow-wrap: anywhere;
   font-size: 1.75rem;
   font-weight: 400;
   line-height: 1.25;
+}
+
+.stage-description {
+  max-width: 68ch;
+  margin: var(--cds-spacing-03) 0 0;
+  color: var(--cds-text-secondary);
+  line-height: 1.5;
+}
+
+.configuration-overview-grid {
+  row-gap: var(--cds-spacing-05);
+  padding-block: var(--cds-spacing-07);
 }
 
 .validation-grid,
@@ -71,6 +84,9 @@ textarea {
 }
 
 .plot-loading {
+  display: grid;
+  min-height: 18rem;
+  place-items: center;
   padding: var(--cds-spacing-07);
   color: var(--cds-text-secondary);
 }
@@ -98,15 +114,12 @@ textarea {
 }
 
 .scientific-plot-surface .modebar {
-  font-family: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--scientific-ui-font-sans, "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif);
 }
 
 @media (max-width: 671px) {
-  .configuration-context {
-    padding: var(--cds-spacing-05);
-  }
-
-  .validation-grid {
+  .validation-grid,
+  .configuration-overview-grid {
     padding-block: var(--cds-spacing-05);
   }
 

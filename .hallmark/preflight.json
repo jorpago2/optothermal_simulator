@@ -1,0 +1,8 @@
+{
+  "scannedAt": "2026-08-14",
+  "designSystem": "Carbon g10 with @jorpago2/scientific-ui",
+  "font": "IBM Plex Sans",
+  "framework": "React 19 with TypeScript and Vite",
+  "spacing": "Carbon 4-point tokens",
+  "motion": "motion-cut"
+}

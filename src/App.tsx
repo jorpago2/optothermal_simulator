@@ -8,7 +8,7 @@ import {
   SettingsAdjust,
   TemperatureHot,
 } from "@carbon/react/icons";
-import { lazy, Suspense, useCallback, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ExportReceipt,
   ResultSwitcher,
@@ -41,10 +41,11 @@ import { validateConfig, validateResult } from "./solver/validation";
 type AppView = "configure" | "results" | "validation";
 type MapView = "peak" | "final";
 
-const TemperatureTransientPlot = lazy(() => import("./components/Plots").then((module) => ({ default: module.TemperatureTransientPlot })));
-const PhaseTransientPlot = lazy(() => import("./components/Plots").then((module) => ({ default: module.PhaseTransientPlot })));
-const RadialTemperaturePlot = lazy(() => import("./components/Plots").then((module) => ({ default: module.RadialTemperaturePlot })));
-const TemperatureMapPlot = lazy(() => import("./components/Plots").then((module) => ({ default: module.TemperatureMapPlot })));
+const loadPlots = () => import("./components/Plots");
+const TemperatureTransientPlot = lazy(() => loadPlots().then((module) => ({ default: module.TemperatureTransientPlot })));
+const PhaseTransientPlot = lazy(() => loadPlots().then((module) => ({ default: module.PhaseTransientPlot })));
+const RadialTemperaturePlot = lazy(() => loadPlots().then((module) => ({ default: module.RadialTemperaturePlot })));
+const TemperatureMapPlot = lazy(() => loadPlots().then((module) => ({ default: module.TemperatureMapPlot })));
 
 const workflow: WorkflowItem[] = [
   { id: "configure", label: "Configure", controlsId: "configuration-panel", icon: <SettingsAdjust size={20} /> },
@@ -83,6 +84,7 @@ export function App() {
   const [mapView, setMapView] = useState<MapView>("peak");
   const [exported, setExported] = useState(false);
   const outcomeRef = useRef<HTMLElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const issues = useMemo(() => validateConfig(config), [config]);
   const hasErrors = issues.some((issue) => issue.severity === "error");
   const modified = Boolean(result && lastRunConfig && JSON.stringify(config) !== JSON.stringify(lastRunConfig));
@@ -110,7 +112,7 @@ export function App() {
     setActiveView("results");
     const started = performance.now();
     try {
-      const next = await runSimulation(config);
+      const [next] = await Promise.all([runSimulation(config), loadPlots()]);
       setResult(next);
       setLastRunConfig({ ...config });
       setRuntimeMs(performance.now() - started);
@@ -120,6 +122,10 @@ export function App() {
       setBusy(false);
     }
   }, [config]);
+
+  useEffect(() => {
+    stageRef.current?.closest(".scientific-workbench__stage")?.scrollTo({ top: 0, behavior: "auto" });
+  }, [activeView]);
 
   useScientificShortcut({
     id: "run-optothermal-model",
@@ -215,7 +221,7 @@ export function App() {
           descriptor="Axisymmetric VO₂"
           productMark={<TemperatureHot size={24} aria-hidden="true" />}
           contextLabel="FIXED POSITION"
-          context="z = 0 · pulsed Gaussian beam"
+          context={`z = 0 · λ ${config.wavelengthUm} µm`}
           status={status}
           primaryAction={<ScientificRunControl execution={{ ...status, onRun: () => { void run(); }, onStop: stop, runLabel: "Run", stopLabel: "Stop", disabled: hasErrors }} size="sm" />}
           help={{
@@ -241,7 +247,7 @@ export function App() {
       )}
       statusBar={<ScientificStatusBar status={status} metadata={[`${config.radialCells} × ${config.substrateCells + 1} r–z cells · ${config.timeSteps} time samples · ${result ? result.engine : "Rust/WASM"}`]} />}
     >
-      <div className="optothermal-stage">
+      <div ref={stageRef} className="optothermal-stage">
         <h1 className="optothermal-visually-hidden">Optothermal Simulator</h1>
         {activeView === "results" && (
           <section id="results-view" aria-label="Simulation results">
@@ -255,14 +261,14 @@ export function App() {
               />
             ) : (
               <ScientificResultsLayout
-                title="Optothermal response"
-                description="One Gaussian-beam position at z = 0; no Z-scan sweep."
+                title="Fixed-position response"
+                description="One Gaussian-beam position at z = 0; no axial sweep or detector propagation."
                 status={status}
                 actions={<ScientificResultsToolbar actions={resultActions} />}
               >
                 <section ref={outcomeRef} tabIndex={-1}>
                   <ScientificOutcomeSummary
-                    title="Pulse response completed"
+                    title="Optothermal pulse completed"
                     headingLevel={3}
                     status={modified ? { state: "modified", label: "Result is stale" } : { state: "up-to-date", label: "Current result" }}
                     summary={result.metrics.maximumMetallicFraction > 0.5 ? "The reference model predicts a substantial thermally driven metallic fraction at the beam centre." : "The reference model remains predominantly on the insulating branch during this pulse."}
@@ -295,7 +301,10 @@ export function App() {
         {activeView === "validation" && (
           <section id="validation-view" aria-labelledby="validation-title">
             <Grid fullWidth narrow className="validation-grid">
-              <Column sm={4} md={8} lg={16}><h2 id="validation-title" className="stage-title">Model and validation</h2></Column>
+              <Column sm={4} md={8} lg={16}>
+                <h2 id="validation-title" className="stage-title">Model and validation</h2>
+                <p className="stage-description">Separate numerical sanity checks from the convergence and sample calibration still required for quantitative use.</p>
+              </Column>
               <Column sm={4} md={8} lg={8}>
                 <ScientificPreflightSummary status={hasErrors ? { state: "failed", label: "Inputs blocked" } : issues.length ? { state: "warning", label: "Ready with warnings" } : { state: "ready", label: "Ready" }} checks={preflightChecks} />
               </Column>
@@ -337,13 +346,24 @@ export function App() {
           </section>
         )}
         {activeView === "configure" && (
-          <section className="configuration-context" aria-label="Configuration context">
-            <ScientificModelScope
-              title="Reference experiment"
-              model="A 1064 nm Gaussian pulse heats a 150 nm VO₂ film on a borosilicate-like substrate at the beam waist."
-              assumptions={["Axisymmetric illumination", "Single pulse", "Normal incidence from the substrate side"]}
-              limits={["No axial scan", "No detector propagation", "Reference rather than measured optical constants"]}
-            />
+          <section className="configuration-overview" aria-labelledby="configuration-overview-title">
+            <Grid fullWidth narrow className="configuration-overview-grid">
+              <Column sm={4} md={8} lg={12}>
+                <h2 id="configuration-overview-title" className="stage-title">Run overview</h2>
+                <p className="stage-description">The reference preset is ready to run. Review the model boundary and numerical checks before interpreting the result.</p>
+              </Column>
+              <Column sm={4} md={8} lg={12}>
+                <ScientificModelScope
+                  title="Reference experiment"
+                  model="A 1064 nm Gaussian pulse heats a 150 nm VO₂ film on a borosilicate-like substrate at the beam waist."
+                  assumptions={["Axisymmetric illumination", "Single pulse", "Normal incidence from the substrate side"]}
+                  limits={["No axial scan", "No detector propagation", "Reference rather than measured optical constants"]}
+                />
+              </Column>
+              <Column sm={4} md={8} lg={12}>
+                <ScientificPreflightSummary status={hasErrors ? { state: "failed", label: "Inputs blocked" } : issues.length ? { state: "warning", label: "Ready with warnings" } : { state: "ready", label: "Ready" }} checks={preflightChecks} />
+              </Column>
+            </Grid>
           </section>
         )}
       </div>

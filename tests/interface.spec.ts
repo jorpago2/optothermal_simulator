@@ -2,8 +2,11 @@ import { expect, test } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 
 const viewports = [
+  { name: "small-mobile", width: 320, height: 720 },
   { name: "mobile", width: 375, height: 812 },
+  { name: "large-mobile", width: 414, height: 896 },
   { name: "tablet", width: 768, height: 900 },
+  { name: "small-desktop", width: 1024, height: 900 },
   { name: "desktop", width: 1440, height: 900 },
 ];
 
@@ -18,6 +21,7 @@ test("configuration shell remains usable across Carbon breakpoints", async ({ pa
     await expect(page.getByRole("link", { name: "Optothermal Simulator" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Single-position model" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Run simulation" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Optical and phase model" })).toHaveAttribute("aria-expanded", "false");
     const fit = await page.evaluate(() => ({
       viewport: document.documentElement.clientWidth,
       content: document.documentElement.scrollWidth,
@@ -31,17 +35,35 @@ test("reference simulation produces plots, validation evidence and export", asyn
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("./");
   await page.getByRole("button", { name: "Run simulation" }).click();
-  await expect(page.getByRole("heading", { name: "Pulse response completed" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Optothermal pulse completed" })).toBeVisible();
   await expect(page.locator(".plot-surface")).toHaveCount(4);
   await expect(page.getByText(/Rust\/WASM/).last()).toBeVisible();
   await page.getByText("Final map", { exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Final r–z temperature" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Final near-surface temperature" })).toBeVisible();
   await page.screenshot({ path: "tests/artifacts/desktop-results.png", fullPage: true });
 
   await page.getByRole("button", { name: "Validation" }).click();
   await expect(page.getByRole("heading", { name: "Model and validation" })).toBeVisible();
   await expect(page.getByText("Core checks passed; convergence pending")).toBeVisible();
   await page.screenshot({ path: "tests/artifacts/desktop-validation.png", fullPage: true });
+});
+
+test("all result panels remain reachable on a narrow mobile stage", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.goto("./");
+  await page.getByRole("button", { name: "Run simulation" }).click();
+  await expect(page.getByRole("heading", { name: "Optothermal pulse completed" })).toBeVisible();
+  await expect(page.locator(".plot-surface")).toHaveCount(4);
+
+  const stage = page.locator(".scientific-workbench__stage");
+  const stageBounds = await stage.boundingBox();
+  const titleBounds = await page.getByRole("heading", { name: "Fixed-position response" }).boundingBox();
+  expect(titleBounds?.y ?? 0).toBeGreaterThanOrEqual(stageBounds?.y ?? 0);
+  await page.screenshot({ path: "tests/artifacts/small-mobile-results.png" });
+  expect(await stage.evaluate((element) => element.scrollHeight)).toBeGreaterThan(await stage.evaluate((element) => element.clientHeight));
+  await stage.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
+  await expect(page.getByRole("heading", { name: "Peak near-surface temperature" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });
 
 test("help, theme and invalid-input states remain keyboard-accessible", async ({ page }) => {
