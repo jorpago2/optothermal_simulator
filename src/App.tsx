@@ -23,10 +23,11 @@ import {
   ScientificResultsToolbar,
   ScientificRunControl,
   ScientificStatusBar,
+  ScientificStageHeader,
   ScientificToolRail,
   ScientificValidationSummary,
+  useScientificFormValidity,
   useScientificResultTransition,
-  useScientificShortcut,
   type ScientificActionDescriptor,
   type ScientificCheckDescriptor,
   type ScientificStatusDescriptor,
@@ -85,8 +86,16 @@ export function App() {
   const [exported, setExported] = useState(false);
   const outcomeRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const {
+    hasInvalidFields,
+    isValid: draftsAreValid,
+    reportFieldValidity,
+    resetValidity,
+    revision: fieldRevision,
+  } = useScientificFormValidity();
   const issues = useMemo(() => validateConfig(config), [config]);
   const hasErrors = issues.some((issue) => issue.severity === "error");
+  const runBlocked = hasErrors || hasInvalidFields;
   const modified = Boolean(result && lastRunConfig && JSON.stringify(config) !== JSON.stringify(lastRunConfig));
 
   const status: ScientificStatusDescriptor = busy
@@ -97,12 +106,12 @@ export function App() {
         ? { state: "modified", label: "Inputs modified", detail: "Run again to update the results." }
         : result
           ? { state: "up-to-date", label: "Results up to date", detail: "Fixed axial position" }
-          : hasErrors
+          : runBlocked
             ? { state: "needs-input", label: "Review inputs" }
             : { state: "ready", label: "Ready", detail: "VO₂ reference preset" };
 
   const run = useCallback(async () => {
-    if (validateConfig(config).some((issue) => issue.severity === "error")) {
+    if (!draftsAreValid() || validateConfig(config).some((issue) => issue.severity === "error")) {
       setActiveView("configure");
       return;
     }
@@ -121,20 +130,12 @@ export function App() {
     } finally {
       setBusy(false);
     }
-  }, [config]);
+  }, [config, draftsAreValid]);
 
   useEffect(() => {
     stageRef.current?.closest(".scientific-workbench__stage")?.scrollTo({ top: 0, behavior: "auto" });
   }, [activeView]);
 
-  useScientificShortcut({
-    id: "run-optothermal-model",
-    shortcut: "mod+enter",
-    displayKeys: ["Ctrl/⌘", "Enter"],
-    description: "Run the fixed-position model",
-    handler: () => { void run(); },
-    enabled: !busy && !hasErrors,
-  });
   useScientificResultTransition({
     state: status.state,
     resultRef: outcomeRef,
@@ -148,6 +149,7 @@ export function App() {
   };
 
   const resetPreset = () => {
+    resetValidity();
     setConfig(cloneReferenceConfig());
     setError("");
   };
@@ -173,20 +175,20 @@ export function App() {
       icon: Restart,
       emphasis: "ghost",
       onClick: () => { void run(); },
-      disabled: busy || hasErrors,
+      disabled: busy || runBlocked,
     },
-  ] : [], [busy, hasErrors, lastRunConfig, result, run]);
+  ] : [], [busy, lastRunConfig, result, run, runBlocked]);
 
   const preflightChecks = useMemo<ScientificCheckDescriptor[]>(() => {
     const pointsPerFwhm = config.timeSteps * config.pulseFwhmNs / config.durationNs;
     const meshCells = config.radialCells * (config.substrateCells + 1);
     return [
-      { id: "input", label: "Parameter ranges", state: hasErrors ? "failed" : "passed", detail: hasErrors ? "Correct the blocking input messages." : "All required values are finite and within solver limits." },
+      { id: "input", label: "Parameter ranges", state: runBlocked ? "failed" : "passed", detail: hasInvalidFields ? "A visible field contains an uncommitted invalid value." : hasErrors ? "Correct the blocking input messages." : "All required values are finite and within solver limits." },
       { id: "time", label: "Pulse resolution", state: pointsPerFwhm >= 16 ? "passed" : "warning", value: `${pointsPerFwhm.toFixed(1)} points/FWHM`, detail: "Implicit integration removes a stability restriction but not temporal discretization error." },
       { id: "radius", label: "Radial boundary", state: config.radiusUm >= 4 * config.waistUm ? "passed" : "warning", value: `${(config.radiusUm / config.waistUm).toFixed(1)} w₀`, detail: "A boundary at four beam waists limits interaction with the heated region." },
       { id: "mesh", label: "Browser mesh", state: meshCells <= 40_000 ? "passed" : "failed", value: `${meshCells.toLocaleString()} cells`, detail: "The hard limit bounds worker memory and interaction latency." },
     ];
-  }, [config, hasErrors]);
+  }, [config, hasErrors, hasInvalidFields, runBlocked]);
 
   const validationChecks = useMemo<ScientificCheckDescriptor[]>(() => {
     if (!result) return [
@@ -223,10 +225,9 @@ export function App() {
           contextLabel="FIXED POSITION"
           context={`z = 0 · λ ${config.wavelengthUm} µm`}
           status={status}
-          primaryAction={<ScientificRunControl execution={{ ...status, onRun: () => { void run(); }, onStop: stop, runLabel: "Run", stopLabel: "Stop", disabled: hasErrors }} size="sm" />}
+          primaryAction={<ScientificRunControl execution={{ ...status, onRun: () => { void run(); }, onStop: stop, runLabel: "Run", stopLabel: "Stop", disabled: runBlocked, disabledReason: runBlocked ? "Review invalid inputs before running." : undefined }} size="sm" />}
           help={{
             summary: "Configure a single axial position, run the Rust/WASM r–z solver, then inspect temperature, phase state and validation evidence.",
-            shortcuts: [{ keys: ["Ctrl/⌘", "Enter"], description: "Run simulation" }],
             footer: "The reference material values are not a substitute for sample-specific calibration.",
           }}
         />
@@ -242,6 +243,9 @@ export function App() {
             onReset={resetPreset}
             onRun={() => { void run(); }}
             onClose={() => setActiveView(result ? "results" : "validation")}
+            onFieldValidationChange={reportFieldValidity}
+            fieldRevision={fieldRevision}
+            hasInvalidDrafts={hasInvalidFields}
           />
         </div>
       )}
@@ -263,7 +267,6 @@ export function App() {
               <ScientificResultsLayout
                 title="Fixed-position response"
                 description="One Gaussian-beam position at z = 0; no axial sweep or detector propagation."
-                status={status}
                 actions={<ScientificResultsToolbar actions={resultActions} />}
               >
                 <section ref={outcomeRef} tabIndex={-1}>
@@ -300,13 +303,14 @@ export function App() {
         )}
         {activeView === "validation" && (
           <section id="validation-view" aria-labelledby="validation-title">
+            <ScientificStageHeader
+              title="Model and validation"
+              titleId="validation-title"
+              description="Separate numerical sanity checks from the convergence and sample calibration still required for quantitative use."
+            />
             <Grid fullWidth narrow className="validation-grid">
-              <Column sm={4} md={8} lg={16}>
-                <h2 id="validation-title" className="stage-title">Model and validation</h2>
-                <p className="stage-description">Separate numerical sanity checks from the convergence and sample calibration still required for quantitative use.</p>
-              </Column>
               <Column sm={4} md={8} lg={8}>
-                <ScientificPreflightSummary status={hasErrors ? { state: "failed", label: "Inputs blocked" } : issues.length ? { state: "warning", label: "Ready with warnings" } : { state: "ready", label: "Ready" }} checks={preflightChecks} />
+                <ScientificPreflightSummary status={runBlocked ? { state: "failed", label: "Inputs blocked" } : issues.length ? { state: "warning", label: "Ready with warnings" } : { state: "ready", label: "Ready" }} checks={preflightChecks} />
               </Column>
               <Column sm={4} md={8} lg={8}>
                 <ScientificValidationSummary status={validationStatus} checks={validationChecks} />
@@ -347,11 +351,12 @@ export function App() {
         )}
         {activeView === "configure" && (
           <section className="configuration-overview" aria-labelledby="configuration-overview-title">
+            <ScientificStageHeader
+              title="Run overview"
+              titleId="configuration-overview-title"
+              description="The reference preset is ready to run. Review the model boundary and numerical checks before interpreting the result."
+            />
             <Grid fullWidth narrow className="configuration-overview-grid">
-              <Column sm={4} md={8} lg={12}>
-                <h2 id="configuration-overview-title" className="stage-title">Run overview</h2>
-                <p className="stage-description">The reference preset is ready to run. Review the model boundary and numerical checks before interpreting the result.</p>
-              </Column>
               <Column sm={4} md={8} lg={12}>
                 <ScientificModelScope
                   title="Reference experiment"
@@ -361,7 +366,7 @@ export function App() {
                 />
               </Column>
               <Column sm={4} md={8} lg={12}>
-                <ScientificPreflightSummary status={hasErrors ? { state: "failed", label: "Inputs blocked" } : issues.length ? { state: "warning", label: "Ready with warnings" } : { state: "ready", label: "Ready" }} checks={preflightChecks} />
+                <ScientificPreflightSummary status={runBlocked ? { state: "failed", label: "Inputs blocked" } : issues.length ? { state: "warning", label: "Ready with warnings" } : { state: "ready", label: "Ready" }} checks={preflightChecks} />
               </Column>
             </Grid>
           </section>

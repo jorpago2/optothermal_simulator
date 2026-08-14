@@ -49,25 +49,9 @@ textarea {
   background: var(--cds-background);
 }
 
-.stage-title {
-  min-width: 0;
-  margin: 0;
-  overflow-wrap: anywhere;
-  font-size: 1.75rem;
-  font-weight: 400;
-  line-height: 1.25;
-}
-
-.stage-description {
-  max-width: 68ch;
-  margin: var(--cds-spacing-03) 0 0;
-  color: var(--cds-text-secondary);
-  line-height: 1.5;
-}
-
 .configuration-overview-grid {
   row-gap: var(--cds-spacing-05);
-  padding-block: var(--cds-spacing-07);
+  padding-block: var(--cds-spacing-05) var(--cds-spacing-07);
 }
 
 .validation-grid,

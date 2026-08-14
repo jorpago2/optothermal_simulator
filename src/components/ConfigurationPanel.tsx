@@ -6,6 +6,7 @@ import {
   ScientificTaskPanel,
   ValidationSummary,
   type ValidationMessage,
+  type ScientificFieldValidationReporter,
 } from "@jorpago2/scientific-ui";
 import type { OptothermalConfig, ValidationIssue } from "../solver/types";
 
@@ -17,6 +18,9 @@ interface ConfigurationPanelProps {
   onReset: () => void;
   onRun: () => void;
   onClose: () => void;
+  onFieldValidationChange: ScientificFieldValidationReporter;
+  fieldRevision: number;
+  hasInvalidDrafts: boolean;
 }
 
 interface FieldDefinition {
@@ -76,11 +80,13 @@ function issueFor(field: keyof OptothermalConfig, issues: ValidationIssue[]) {
   return issues.find((issue) => issue.field === field)?.message;
 }
 
-function Fields({ definitions, config, issues, onChange }: {
+function Fields({ definitions, config, issues, onChange, onFieldValidationChange, fieldRevision }: {
   definitions: FieldDefinition[];
   config: OptothermalConfig;
   issues: ValidationIssue[];
   onChange: ConfigurationPanelProps["onChange"];
+  onFieldValidationChange: ScientificFieldValidationReporter;
+  fieldRevision: number;
 }) {
   return definitions.map((definition) => (
     <ScientificNumberField
@@ -93,12 +99,14 @@ function Fields({ definitions, config, issues, onChange }: {
       max={definition.max}
       helperText={definition.helperText}
       invalidText={issueFor(definition.key, issues)}
+      revision={fieldRevision}
+      onValidationChange={(message) => onFieldValidationChange(String(definition.key), message)}
       onValueChange={(value) => { if (value !== null) onChange(definition.key, value); }}
     />
   ));
 }
 
-export function ConfigurationPanel({ config, issues, busy, onChange, onReset, onRun, onClose }: ConfigurationPanelProps) {
+export function ConfigurationPanel({ config, issues, busy, onChange, onReset, onRun, onClose, onFieldValidationChange, fieldRevision, hasInvalidDrafts }: ConfigurationPanelProps) {
   const errors = issues.filter((issue) => issue.severity === "error");
   const messages: ValidationMessage[] = issues.map((issue) => ({
     id: issue.id,
@@ -117,26 +125,26 @@ export function ConfigurationPanel({ config, issues, busy, onChange, onReset, on
       onClose={onClose}
       closeLabel="Close configuration"
       footer={(
-        <ScientificPanelFooter summary={errors.length ? `${errors.length} blocking issue${errors.length === 1 ? "" : "s"}` : "Ready for a fixed-position run"}>
+        <ScientificPanelFooter summary={hasInvalidDrafts ? "Review the invalid field before running" : errors.length ? `${errors.length} blocking issue${errors.length === 1 ? "" : "s"}` : "Ready for a fixed-position run"}>
           <Button type="button" kind="secondary" disabled={busy} onClick={onReset}>Reset preset</Button>
-          <Button type="button" kind="primary" disabled={busy || errors.length > 0} onClick={onRun}>{busy ? "Running…" : "Run simulation"}</Button>
+          <Button type="button" kind="primary" disabled={busy || errors.length > 0 || hasInvalidDrafts} onClick={onRun}>{busy ? "Running…" : "Run simulation"}</Button>
         </ScientificPanelFooter>
       )}
     >
       <ScientificParameterSection title="Pulse and beam" description="Gaussian pulse evaluated at the beam waist; no axial sweep is performed." columns={1}>
-        <Fields definitions={beamFields} config={config} issues={issues} onChange={onChange} />
+        <Fields definitions={beamFields} config={config} issues={issues} onChange={onChange} onFieldValidationChange={onFieldValidationChange} fieldRevision={fieldRevision} />
       </ScientificParameterSection>
       <ScientificParameterSection title="Geometry" columns={1}>
-        <Fields definitions={geometryFields} config={config} issues={issues} onChange={onChange} />
+        <Fields definitions={geometryFields} config={config} issues={issues} onChange={onChange} onFieldValidationChange={onFieldValidationChange} fieldRevision={fieldRevision} />
       </ScientificParameterSection>
       <ScientificParameterSection title="Optical and phase model" description="Reference values are sample-dependent and should be replaced by measured ellipsometry." columns={1} collapsible defaultOpen={false}>
-        <Fields definitions={opticalFields} config={config} issues={issues} onChange={onChange} />
+        <Fields definitions={opticalFields} config={config} issues={issues} onChange={onChange} onFieldValidationChange={onFieldValidationChange} fieldRevision={fieldRevision} />
       </ScientificParameterSection>
       <ScientificParameterSection title="Thermal properties" columns={1} collapsible defaultOpen={false}>
-        <Fields definitions={thermalFields} config={config} issues={issues} onChange={onChange} />
+        <Fields definitions={thermalFields} config={config} issues={issues} onChange={onChange} onFieldValidationChange={onFieldValidationChange} fieldRevision={fieldRevision} />
       </ScientificParameterSection>
       <ScientificParameterSection title="Numerical mesh" description="The implicit solver is stable for large steps, but the pulse still requires temporal resolution." columns={1} collapsible defaultOpen={false}>
-        <Fields definitions={numericalFields} config={config} issues={issues} onChange={onChange} />
+        <Fields definitions={numericalFields} config={config} issues={issues} onChange={onChange} onFieldValidationChange={onFieldValidationChange} fieldRevision={fieldRevision} />
       </ScientificParameterSection>
       {messages.length > 0 && <ValidationSummary heading="Input review" messages={messages} />}
     </ScientificTaskPanel>

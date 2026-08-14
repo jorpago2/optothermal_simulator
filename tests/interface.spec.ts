@@ -82,6 +82,7 @@ test("help, theme and invalid-input states remain keyboard-accessible", async ({
   await page.goto("./");
   await page.getByRole("button", { name: "Help" }).click();
   await expect(page.getByText("Quick workflow")).toBeVisible();
+  await expect(page.locator("dt").filter({ hasText: "Ctrl/⌘Enter" })).toHaveCount(1);
   await page.keyboard.press("Escape");
   await expect(page.getByText("Quick workflow")).toBeHidden();
 
@@ -94,4 +95,41 @@ test("help, theme and invalid-input states remain keyboard-accessible", async ({
   await duration.press("Enter");
   await expect(page.getByText("Use at least six pulse FWHM so the Gaussian pulse is contained in the time window.").first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Run simulation" })).toBeDisabled();
+});
+
+test("an invalid visible draft cannot run a stale committed value", async ({ page }) => {
+  await page.setViewportSize({ width: 414, height: 896 });
+  await page.goto("./");
+
+  const wavelength = page.getByLabel("Wavelength in µm");
+  await wavelength.fill("-1");
+  await wavelength.blur();
+
+  await expect(wavelength).toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByRole("button", { name: "Run simulation" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Run", exact: true })).toBeDisabled();
+
+  await page.getByRole("button", { name: "Reset preset" }).click();
+  await expect(wavelength).toHaveValue("1.064");
+  await expect(page.getByRole("button", { name: "Run simulation" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Run", exact: true })).toBeEnabled();
+});
+
+test("plot controls stay outside the scientific data region", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("./");
+  await page.getByRole("button", { name: "Run simulation" }).click();
+  await expect(page.getByRole("heading", { name: "Optothermal pulse completed" })).toBeVisible();
+
+  const firstFrame = page.locator(".scientific-plot-frame").first();
+  const toolbarHost = firstFrame.locator(".scientific-plot-frame__toolbar");
+  const toolbar = firstFrame.getByRole("toolbar", { name: "Plot controls" });
+  const plot = firstFrame.locator(".scientific-plot-surface");
+  await expect(toolbarHost).toBeVisible();
+  await expect(toolbar).toBeVisible();
+
+  const [toolbarBounds, plotBounds] = await Promise.all([toolbarHost.boundingBox(), plot.boundingBox()]);
+  expect(toolbarBounds?.width).toBeLessThanOrEqual(plotBounds?.width ?? 0);
+  expect(toolbarBounds?.y ?? 0).toBeLessThan(plotBounds?.y ?? 0);
+  expect((toolbarBounds?.y ?? 0) + (toolbarBounds?.height ?? 0)).toBeLessThanOrEqual(plotBounds?.y ?? 0);
 });
