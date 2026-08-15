@@ -228,9 +228,11 @@ export function App() {
     <ScientificAppShell
       className="optothermal-app"
       panelOpen={panelOpen}
+      previewStageWhenPanelOpen
       header={(
         <ScientificHeader
           product="Optothermal Simulator"
+          compactProduct="Optothermal"
           descriptor="Axisymmetric VO₂"
           productMark={<TemperatureHot size={24} aria-hidden="true" />}
           contextLabel="FIXED POSITION"
