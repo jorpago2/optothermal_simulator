@@ -47,9 +47,10 @@ test("run overview presents the experiment visually and updates with the configu
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("./");
 
-  await expect(page.getByRole("heading", { name: "Gaussian pulse on a VO₂ film" })).toBeVisible();
-  await expect(page.getByText("Incident through substrate")).toBeVisible();
-  await expect(page.getByText("Axisymmetric r–z · geometry not to scale")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Optical stack and beam" })).toBeVisible();
+  await expect(page.getByText("Substrate-side incidence · axisymmetric r–z · not to scale")).toBeVisible();
+  await expect(page.getByText("Radial domain", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Model scope", { exact: true })).toHaveCount(0);
 
   const waist = page.getByLabel("Beam waist w₀ in µm");
   await waist.fill("15");
@@ -59,7 +60,8 @@ test("run overview presents the experiment visually and updates with the configu
   const cards = page.locator(".scientific-evidence-summary__checks > li");
   await expect(cards).toHaveCount(4);
   const rows = await cards.evaluateAll((elements) => elements.map((element) => Math.round(element.getBoundingClientRect().top)));
-  expect(new Set(rows).size).toBe(2);
+  expect(new Set(rows).size).toBe(1);
+  await expect(page.getByText("All required values are finite and within solver limits.")).toHaveCount(0);
 });
 
 test("reference simulation produces plots, validation evidence and export", async ({ page }) => {
@@ -68,6 +70,9 @@ test("reference simulation produces plots, validation evidence and export", asyn
   await page.getByRole("button", { name: "Run simulation" }).click();
   await expect(page.getByRole("heading", { name: "Optothermal pulse completed" })).toBeVisible();
   await expect(page.locator(".plot-surface")).toHaveCount(4);
+  await expect(page.locator(".plot-column")).toHaveCount(2);
+  await expect(page.locator(".plot-column").first().locator(".scientific-plot-frame")).toHaveCount(2);
+  await expect(page.locator(".plot-column").last().locator(".scientific-plot-frame")).toHaveCount(2);
   await expect(page.getByText(/Rust\/WASM/).last()).toBeVisible();
   await page.getByText("Final map", { exact: true }).click();
   await expect(page.getByRole("heading", { name: "Final near-surface temperature" })).toBeVisible();

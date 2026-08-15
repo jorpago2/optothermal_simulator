@@ -287,10 +287,12 @@ export function App() {
                 {exported && <ExportReceipt fileName="optothermal-vo2-result.json" format="JSON" destination="Browser downloads" onDismiss={() => setExported(false)} />}
                 <Suspense fallback={<p className="plot-loading" role="status">Loading scientific plots…</p>}>
                   <Grid fullWidth narrow className="plot-grid">
-                    <Column sm={4} md={8} lg={8}><TemperatureTransientPlot result={result} /></Column>
-                    <Column sm={4} md={8} lg={8}><PhaseTransientPlot result={result} /></Column>
-                    <Column sm={4} md={8} lg={8}><RadialTemperaturePlot result={result} /></Column>
-                    <Column sm={4} md={8} lg={8}>
+                    <Column sm={4} md={8} lg={8} className="plot-column">
+                      <TemperatureTransientPlot result={result} />
+                      <RadialTemperaturePlot result={result} />
+                    </Column>
+                    <Column sm={4} md={8} lg={8} className="plot-column">
+                      <PhaseTransientPlot result={result} />
                       <div className="map-result">
                         <ResultSwitcher options={[{ id: "peak", label: "Peak map" }, { id: "final", label: "Final map" }]} activeId={mapView} onChange={(id) => setMapView(id as MapView)} label="Temperature map" />
                         <TemperatureMapPlot result={result} view={mapView} />
@@ -355,17 +357,22 @@ export function App() {
             <ScientificStageHeader
               title="Run overview"
               titleId="configuration-overview-title"
-              description="Inspect the optical path, active layer and numerical readiness before running."
             />
             <Grid fullWidth narrow className="configuration-overview-grid">
               <Column sm={4} md={8} lg={16}>
-                <ExperimentOverview
-                  config={config}
-                  status={runBlocked ? { state: "failed", label: "Inputs blocked" } : issues.length ? { state: "warning", label: "Ready with warnings" } : { state: "ready", label: "Ready to run" }}
-                />
+                <ExperimentOverview config={config} />
               </Column>
               <Column sm={4} md={8} lg={16}>
-                <ScientificPreflightSummary status={runBlocked ? { state: "failed", label: "Inputs blocked" } : issues.length ? { state: "warning", label: "Ready with warnings" } : { state: "ready", label: "Ready" }} checks={preflightChecks} />
+                <ScientificPreflightSummary
+                  compact
+                  title="Numerical checks"
+                  status={runBlocked ? { state: "failed", label: "Inputs blocked" } : issues.length ? { state: "warning", label: "Ready with warnings" } : { state: "ready", label: "Ready" }}
+                  checks={preflightChecks.map((check) => ({
+                    ...check,
+                    detail: undefined,
+                    value: check.value ?? (check.state === "passed" ? "Within limits" : undefined),
+                  }))}
+                />
               </Column>
             </Grid>
           </section>
