@@ -404,8 +404,8 @@ textarea {
   }
 
   .experiment-diagram__axis-label--radial {
-    inset-block-start: calc(28% - 1.75rem);
-    inset-inline-start: calc(50% + var(--scientific-ui-spacing-03));
+    inset-block-start: calc(28% - 3rem);
+    inset-inline-start: calc(50% - 2rem);
   }
 
   .experiment-diagram__axis-label--axial {
