@@ -77,7 +77,7 @@ const numericalFields: FieldDefinition[] = [
 ];
 
 function issueFor(field: keyof OptothermalConfig, issues: ValidationIssue[]) {
-  return issues.find((issue) => issue.field === field)?.message;
+  return issues.find((issue) => issue.field === field && issue.severity === "error")?.message;
 }
 
 function Fields({ definitions, config, issues, onChange, onFieldValidationChange, fieldRevision }: {

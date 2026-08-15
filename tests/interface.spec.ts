@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 import { mkdir } from "node:fs/promises";
 
 const viewports = [
@@ -9,6 +10,11 @@ const viewports = [
   { name: "small-desktop", width: 1024, height: 900 },
   { name: "desktop", width: 1440, height: 900 },
 ];
+
+const expectAccessible = async (page: Page) => {
+  const results = await new AxeBuilder({ page }).exclude(".js-plotly-plot").analyze();
+  expect(results.violations.filter((violation) => ["serious", "critical"].includes(violation.impact ?? ""))).toEqual([]);
+};
 
 test.beforeAll(async () => {
   await mkdir("tests/artifacts", { recursive: true });
@@ -82,6 +88,8 @@ test("run overview presents the experiment visually and updates with the configu
   await expect(page.getByText("All required values are finite and within solver limits.")).toHaveCount(0);
   const checksBounds = await page.locator(".scientific-evidence-summary").boundingBox();
   expect(checksBounds?.height ?? Number.POSITIVE_INFINITY).toBeLessThan(diagramBounds?.height ?? 0);
+  await expect(page.locator(".experiment-overview")).toHaveScreenshot("reference-overview.png", { animations: "disabled", maxDiffPixelRatio: 0.01 });
+  await expectAccessible(page);
 });
 
 test("reference simulation produces plots, validation evidence and export", async ({ page }) => {
@@ -97,6 +105,7 @@ test("reference simulation produces plots, validation evidence and export", asyn
   await page.getByText("Final map", { exact: true }).click();
   await expect(page.getByRole("heading", { name: "Final near-surface temperature" })).toBeVisible();
   await page.screenshot({ path: "tests/artifacts/desktop-results.png", fullPage: true });
+  await expectAccessible(page);
 
   await page.getByRole("button", { name: "Validation" }).click();
   await expect(page.getByRole("heading", { name: "Model and validation" })).toBeVisible();
@@ -138,6 +147,8 @@ test("help, theme and invalid-input states remain keyboard-accessible", async ({
   await page.getByRole("button", { name: "Use dark theme" }).click();
   await expect(page.getByRole("button", { name: "Use light theme" })).toBeVisible();
   await page.screenshot({ path: "tests/artifacts/mobile-dark.png" });
+  await expect(page.locator("header").first()).toHaveScreenshot("mobile-dark-header.png", { animations: "disabled", maxDiffPixelRatio: 0.01 });
+  await expectAccessible(page);
 
   const duration = page.getByLabel("Simulated window in ns");
   await duration.fill("2");
@@ -181,4 +192,10 @@ test("plot controls stay outside the scientific data region", async ({ page }) =
   expect(toolbarBounds?.width).toBeLessThanOrEqual(plotBounds?.width ?? 0);
   expect(toolbarBounds?.y ?? 0).toBeLessThan(plotBounds?.y ?? 0);
   expect((toolbarBounds?.y ?? 0) + (toolbarBounds?.height ?? 0)).toBeLessThanOrEqual(plotBounds?.y ?? 0);
+
+  for (const label of ["Peak map", "Final map"]) {
+    const bounds = await page.getByRole("tab", { name: label, exact: true }).boundingBox();
+    expect(bounds?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect(bounds?.width ?? 0).toBeGreaterThanOrEqual(44);
+  }
 });

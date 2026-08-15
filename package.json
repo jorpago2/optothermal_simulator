@@ -27,6 +27,7 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.10.2",
     "@playwright/test": "1.62.1",
     "@types/node": "24.10.13",
     "@types/plotly.js": "3.0.10",
