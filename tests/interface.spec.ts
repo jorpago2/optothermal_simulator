@@ -20,6 +20,9 @@ test("configuration shell remains usable across Carbon breakpoints", async ({ pa
     await page.goto("./");
     await expect(page.getByRole("link", { name: "Optothermal Simulator" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Single-position model" })).toBeVisible();
+    if (viewport.width >= 1056) {
+      await expect(page.getByRole("img", { name: "Axisymmetric optothermal experiment" })).toBeVisible();
+    }
     await expect(page.getByRole("button", { name: "Run simulation" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Optical and phase model" })).toHaveAttribute("aria-expanded", "false");
     if (viewport.width === 320) {
@@ -38,6 +41,25 @@ test("configuration shell remains usable across Carbon breakpoints", async ({ pa
     expect(fit.content).toBeLessThanOrEqual(fit.viewport);
     await page.screenshot({ path: `tests/artifacts/${viewport.name}-configuration.png` });
   }
+});
+
+test("run overview presents the experiment visually and updates with the configuration", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("./");
+
+  await expect(page.getByRole("heading", { name: "Gaussian pulse on a VO₂ film" })).toBeVisible();
+  await expect(page.getByText("Incident through substrate")).toBeVisible();
+  await expect(page.getByText("Axisymmetric r–z · geometry not to scale")).toBeVisible();
+
+  const waist = page.getByLabel("Beam waist w₀ in µm");
+  await waist.fill("15");
+  await waist.press("Enter");
+  await expect(page.locator(".experiment-schematic__annotation").filter({ hasText: "w₀ = 15 µm" })).toBeVisible();
+
+  const cards = page.locator(".scientific-evidence-summary__checks > li");
+  await expect(cards).toHaveCount(4);
+  const rows = await cards.evaluateAll((elements) => elements.map((element) => Math.round(element.getBoundingClientRect().top)));
+  expect(new Set(rows).size).toBe(2);
 });
 
 test("reference simulation produces plots, validation evidence and export", async ({ page }) => {

@@ -54,6 +54,161 @@ textarea {
   padding-block: var(--cds-spacing-05) var(--cds-spacing-07);
 }
 
+.experiment-overview {
+  min-inline-size: 0;
+  background: var(--cds-layer-01);
+}
+
+.experiment-overview__header {
+  display: flex;
+  min-inline-size: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--cds-spacing-05);
+  padding: var(--cds-spacing-05);
+  border-block-end: 1px solid var(--cds-border-subtle-01);
+}
+
+.experiment-overview__eyebrow,
+.experiment-overview__header h3 {
+  margin: 0;
+}
+
+.experiment-overview__eyebrow {
+  color: var(--cds-text-secondary);
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.experiment-overview__header h3 {
+  margin-block-start: var(--cds-spacing-02);
+  font-size: 1.25rem;
+  font-weight: 400;
+  line-height: 1.5rem;
+}
+
+.experiment-overview__body {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(15rem, 1fr);
+}
+
+.experiment-overview__schematic {
+  min-inline-size: 0;
+  padding: var(--cds-spacing-05);
+  border-inline-end: 1px solid var(--cds-border-subtle-01);
+  background: var(--cds-background);
+}
+
+.experiment-overview__schematic svg {
+  display: block;
+  inline-size: 100%;
+  block-size: auto;
+  max-block-size: 22rem;
+}
+
+.experiment-schematic__ambient {
+  fill: var(--cds-layer-01);
+}
+
+.experiment-schematic__film {
+  fill: var(--cds-text-primary);
+}
+
+.experiment-schematic__substrate {
+  fill: var(--cds-layer-02);
+}
+
+.experiment-schematic__beam {
+  fill: var(--cds-interactive);
+  opacity: 0.16;
+}
+
+.experiment-schematic__beam-axis,
+.experiment-schematic__beam-arrow,
+.experiment-schematic__waist,
+.experiment-schematic__tick {
+  fill: none;
+  stroke: var(--cds-interactive);
+  stroke-width: 2;
+}
+
+.experiment-schematic__symmetry {
+  stroke: var(--cds-border-strong-01);
+  stroke-dasharray: 5 5;
+}
+
+.experiment-schematic__material,
+.experiment-schematic__annotation,
+.experiment-schematic__axis-label {
+  fill: var(--cds-text-primary);
+  font-family: var(--scientific-ui-font-sans, "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif);
+  font-size: 15px;
+}
+
+.experiment-schematic__material--film {
+  fill: var(--cds-text-secondary);
+  font-size: 13px;
+}
+
+.experiment-schematic__annotation,
+.experiment-schematic__axis-label {
+  fill: var(--cds-text-secondary);
+  font-size: 13px;
+}
+
+.experiment-overview__caption {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--cds-spacing-05);
+  margin-block-start: var(--cds-spacing-03);
+  color: var(--cds-text-secondary);
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.experiment-overview__parameters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: stretch;
+  margin: 0;
+}
+
+.experiment-overview__parameters > div {
+  min-inline-size: 0;
+  padding: var(--cds-spacing-05);
+  border-block-end: 1px solid var(--cds-border-subtle-01);
+}
+
+.experiment-overview__parameters > div:nth-child(odd) {
+  border-inline-end: 1px solid var(--cds-border-subtle-01);
+}
+
+.experiment-overview__parameters dt {
+  color: var(--cds-text-secondary);
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.experiment-overview__parameters dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--cds-spacing-02);
+  margin: var(--cds-spacing-03) 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.experiment-overview__parameters strong {
+  font-size: 1.25rem;
+  font-weight: 400;
+  line-height: 1.5rem;
+}
+
+.experiment-overview__parameters span {
+  color: var(--cds-text-secondary);
+  font-size: 0.75rem;
+}
+
 .validation-grid,
 .plot-grid {
   row-gap: var(--cds-spacing-05);
@@ -110,5 +265,26 @@ textarea {
   .plot-surface,
   .plot-surface--map {
     height: 18rem;
+  }
+
+  .experiment-overview__header,
+  .experiment-overview__caption {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--cds-spacing-03);
+  }
+
+  .experiment-overview__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .experiment-overview__schematic {
+    padding: var(--cds-spacing-04);
+    border-block-end: 1px solid var(--cds-border-subtle-01);
+    border-inline-end: 0;
+  }
+
+  .experiment-overview__parameters > div {
+    padding: var(--cds-spacing-04);
   }
 }

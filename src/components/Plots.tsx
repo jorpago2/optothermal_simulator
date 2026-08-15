@@ -26,8 +26,12 @@ function usePlot(
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
-    const base = createScientificPlotlyLayout({ theme }) as Partial<Plotly.Layout>;
-    void Plotly.react(element, data, { ...base, ...layout, autosize: true }, plotConfig).then(prepareScientificPlotlyToolbar);
+    const themedLayout = createScientificPlotlyLayout({
+      theme,
+      hovermode: "closest",
+      overrides: layout as Record<string, unknown>,
+    }) as Partial<Plotly.Layout>;
+    void Plotly.react(element, data, { ...themedLayout, autosize: true }, plotConfig).then(prepareScientificPlotlyToolbar);
     return () => { Plotly.purge(element); };
     // The caller supplies the scientific data dependencies; theme is tracked here.
     // eslint-disable-next-line react-hooks/exhaustive-deps

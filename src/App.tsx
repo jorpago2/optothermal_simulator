@@ -34,6 +34,7 @@ import {
   type WorkflowItem,
 } from "@jorpago2/scientific-ui";
 import { ConfigurationPanel } from "./components/ConfigurationPanel";
+import { ExperimentOverview } from "./components/ExperimentOverview";
 import { VO2_REFERENCE_CONFIG } from "./solver/defaults";
 import { cancelActiveSimulation, runSimulation } from "./solver/workerClient";
 import type { OptothermalConfig, OptothermalResult } from "./solver/types";
@@ -354,18 +355,16 @@ export function App() {
             <ScientificStageHeader
               title="Run overview"
               titleId="configuration-overview-title"
-              description="The reference preset is ready to run. Review the model boundary and numerical checks before interpreting the result."
+              description="Inspect the optical path, active layer and numerical readiness before running."
             />
             <Grid fullWidth narrow className="configuration-overview-grid">
-              <Column sm={4} md={8} lg={12}>
-                <ScientificModelScope
-                  title="Reference experiment"
-                  model="A 1064 nm Gaussian pulse heats a 150 nm VO₂ film on a borosilicate-like substrate at the beam waist."
-                  assumptions={["Axisymmetric illumination", "Single pulse", "Normal incidence from the substrate side"]}
-                  limits={["No axial scan", "No detector propagation", "Reference rather than measured optical constants"]}
+              <Column sm={4} md={8} lg={16}>
+                <ExperimentOverview
+                  config={config}
+                  status={runBlocked ? { state: "failed", label: "Inputs blocked" } : issues.length ? { state: "warning", label: "Ready with warnings" } : { state: "ready", label: "Ready to run" }}
                 />
               </Column>
-              <Column sm={4} md={8} lg={12}>
+              <Column sm={4} md={8} lg={16}>
                 <ScientificPreflightSummary status={runBlocked ? { state: "failed", label: "Inputs blocked" } : issues.length ? { state: "warning", label: "Ready with warnings" } : { state: "ready", label: "Ready" }} checks={preflightChecks} />
               </Column>
             </Grid>
