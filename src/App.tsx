@@ -77,6 +77,7 @@ function downloadJson(config: OptothermalConfig, result: OptothermalResult) {
 
 export function App() {
   const [activeView, setActiveView] = useState<AppView>("configure");
+  const [configurationOpen, setConfigurationOpen] = useState(true);
   const [config, setConfig] = useState<OptothermalConfig>(cloneReferenceConfig);
   const [lastRunConfig, setLastRunConfig] = useState<OptothermalConfig>();
   const [result, setResult] = useState<OptothermalResult>();
@@ -211,7 +212,7 @@ export function App() {
       ? { state: "warning", label: "Core checks passed; convergence pending" }
       : { state: "failed", label: "Validation check failed" };
 
-  const panelOpen = activeView === "configure";
+  const panelOpen = activeView === "configure" && configurationOpen;
   const navigationItems = workflow.map((item) => item.id === "results" && busy ? { ...item, status: "loading" as const, statusLabel: "Simulation running" } : item);
 
   return (
@@ -233,7 +234,23 @@ export function App() {
           }}
         />
       )}
-      navigation={<ScientificToolRail items={navigationItems} activeId={activeView} expandedId={panelOpen ? "configure" : null} collapsible onChange={(id) => setActiveView((id ?? (result ? "results" : "configure")) as AppView)} />}
+      navigation={(
+        <ScientificToolRail
+          items={navigationItems}
+          activeId={activeView}
+          expandedId={panelOpen ? "configure" : null}
+          collapsible
+          onChange={(id) => {
+            if (id === null && activeView === "configure") {
+              setConfigurationOpen(false);
+              return;
+            }
+            const nextView = (id ?? (result ? "results" : "configure")) as AppView;
+            setActiveView(nextView);
+            setConfigurationOpen(nextView === "configure");
+          }}
+        />
+      )}
       panel={(
         <div id="configuration-panel">
           <ConfigurationPanel
@@ -243,7 +260,7 @@ export function App() {
             onChange={updateConfig}
             onReset={resetPreset}
             onRun={() => { void run(); }}
-            onClose={() => setActiveView(result ? "results" : "validation")}
+            onClose={() => setConfigurationOpen(false)}
             onFieldValidationChange={reportFieldValidity}
             fieldRevision={fieldRevision}
             hasInvalidDrafts={hasInvalidFields}
@@ -262,7 +279,7 @@ export function App() {
                 title={busy ? "Solving the optothermal response" : "No result yet"}
                 description={busy ? "The axisymmetric thermal solve is running in a background worker." : "Review the reference preset and run the fixed-position model."}
                 icon={<TemperatureHot size={32} />}
-                action={!busy ? <Button type="button" renderIcon={Play} onClick={() => setActiveView("configure")}>Open configuration</Button> : undefined}
+                action={!busy ? <Button type="button" renderIcon={Play} onClick={() => { setActiveView("configure"); setConfigurationOpen(true); }}>Open configuration</Button> : undefined}
               />
             ) : (
               <ScientificResultsLayout

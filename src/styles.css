@@ -50,8 +50,8 @@ textarea {
 }
 
 .configuration-overview-grid {
-  row-gap: var(--cds-spacing-05);
-  padding-block: var(--cds-spacing-05) var(--cds-spacing-07);
+  row-gap: var(--scientific-ui-spacing-05);
+  padding-block: var(--scientific-ui-spacing-05) var(--scientific-ui-spacing-07);
 }
 
 .experiment-overview {
@@ -61,7 +61,7 @@ textarea {
 
 .experiment-overview__header {
   min-inline-size: 0;
-  padding: var(--cds-spacing-04) var(--cds-spacing-05);
+  padding: var(--scientific-ui-spacing-04) var(--scientific-ui-spacing-05);
   border-block-end: 1px solid var(--cds-border-subtle-01);
 }
 
@@ -72,144 +72,224 @@ textarea {
   line-height: 1.25rem;
 }
 
-.experiment-overview__body {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(15rem, 1fr);
-}
-
-.experiment-overview__schematic {
+.experiment-diagram {
+  position: relative;
+  isolation: isolate;
+  inline-size: 100%;
   min-inline-size: 0;
-  padding: var(--cds-spacing-04);
-  border-inline-end: 1px solid var(--cds-border-subtle-01);
+  min-block-size: 22rem;
+  max-block-size: 28rem;
+  aspect-ratio: 2.6 / 1;
+  margin: 0;
+  overflow: hidden;
+  border-block-end: 1px solid var(--cds-border-subtle-01);
   background: var(--cds-background);
 }
 
-.experiment-overview__schematic svg {
-  display: block;
-  inline-size: 100%;
-  block-size: auto;
-  max-block-size: 22rem;
+.experiment-diagram__ambient,
+.experiment-diagram__substrate,
+.experiment-diagram__film,
+.experiment-diagram__beam,
+.experiment-diagram__symmetry,
+.experiment-diagram__beam-axis,
+.experiment-diagram__waist {
+  position: absolute;
 }
 
-.experiment-schematic__ambient {
-  fill: var(--cds-layer-01);
+.experiment-diagram__ambient {
+  z-index: 0;
+  inset: 0 0 auto;
+  block-size: 34%;
+  background: var(--cds-layer-01);
 }
 
-.experiment-schematic__film {
-  fill: var(--cds-text-primary);
+.experiment-diagram__substrate {
+  z-index: 0;
+  inset: calc(34% + 0.75rem) 0 0;
+  background: var(--cds-layer-02);
 }
 
-.experiment-schematic__substrate {
-  fill: var(--cds-layer-02);
+.experiment-diagram__film {
+  z-index: 3;
+  inset: 34% 0 auto;
+  block-size: 0.75rem;
+  background: var(--cds-text-primary);
 }
 
-.experiment-schematic__beam {
-  fill: var(--cds-interactive);
+.experiment-diagram__beam {
+  z-index: 1;
+  inset-block: calc(34% + 0.75rem) 0;
+  inset-inline-start: 50%;
+  inline-size: min(48%, 32rem);
+  background: var(--cds-interactive);
+  clip-path: polygon(42% 0, 58% 0, 100% 100%, 0 100%);
   opacity: 0.16;
+  transform: translateX(-50%);
 }
 
-.experiment-schematic__beam-axis,
-.experiment-schematic__beam-arrow,
-.experiment-schematic__waist,
-.experiment-schematic__tick {
-  fill: none;
-  stroke: var(--cds-interactive);
-  stroke-width: 2;
+.experiment-diagram__symmetry {
+  z-index: 2;
+  inset-block: var(--scientific-ui-spacing-05) var(--scientific-ui-spacing-05);
+  inset-inline-start: 50%;
+  border-inline-start: 1px dashed var(--cds-border-strong-01);
 }
 
-.experiment-schematic__symmetry {
-  stroke: var(--cds-border-strong-01);
-  stroke-dasharray: 5 5;
+.experiment-diagram__beam-axis {
+  z-index: 4;
+  inset-block: 24% 7%;
+  inset-inline-start: 50%;
+  border-inline-start: 2px solid var(--cds-interactive);
 }
 
-.experiment-schematic__material,
-.experiment-schematic__annotation,
-.experiment-schematic__axis-label {
-  fill: var(--cds-text-primary);
-  font-family: var(--scientific-ui-font-sans, "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif);
-  font-size: 15px;
+.experiment-diagram__beam-axis::before {
+  position: absolute;
+  inset-block-start: -0.125rem;
+  inset-inline-start: -0.4375rem;
+  inline-size: 0.625rem;
+  block-size: 0.625rem;
+  border-block-start: 2px solid var(--cds-interactive);
+  border-inline-start: 2px solid var(--cds-interactive);
+  content: "";
+  transform: rotate(45deg);
 }
 
-.experiment-schematic__material--film {
-  fill: var(--cds-text-secondary);
-  font-size: 13px;
+.experiment-diagram__waist {
+  z-index: 4;
+  inset-block-start: calc(34% - 1.25rem);
+  inset-inline-start: 50%;
+  inline-size: 8rem;
+  block-size: 0.75rem;
+  border-block-start: 2px solid var(--cds-interactive);
+  border-inline: 2px solid var(--cds-interactive);
+  transform: translateX(-50%);
 }
 
-.experiment-schematic__annotation,
-.experiment-schematic__axis-label {
-  fill: var(--cds-text-secondary);
-  font-size: 13px;
+.experiment-diagram__material,
+.experiment-diagram__annotation,
+.experiment-diagram__axis-label,
+.experiment-diagram__caption {
+  position: absolute;
+  z-index: 5;
 }
 
-.experiment-overview__caption {
-  margin-block-start: var(--cds-spacing-03);
+.experiment-diagram__material {
+  display: flex;
+  align-items: baseline;
+  gap: var(--scientific-ui-spacing-03);
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.125rem;
+}
+
+.experiment-diagram__material strong {
+  font-weight: 600;
+}
+
+.experiment-diagram__material span,
+.experiment-diagram__annotation dt,
+.experiment-diagram__annotation span,
+.experiment-diagram__axis-label,
+.experiment-diagram__caption {
   color: var(--cds-text-secondary);
   font-size: 0.75rem;
   line-height: 1rem;
 }
 
-.experiment-overview__parameters {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-content: stretch;
+.experiment-diagram__material--ambient {
+  inset-block-start: var(--scientific-ui-spacing-05);
+  inset-inline-start: var(--scientific-ui-spacing-05);
+}
+
+.experiment-diagram__material--film {
+  inset-block-start: calc(34% - 1.25rem);
+  inset-inline-start: var(--scientific-ui-spacing-05);
+}
+
+.experiment-diagram__material--substrate {
+  inset-block-start: calc(34% + 2rem);
+  inset-inline-start: var(--scientific-ui-spacing-05);
+}
+
+.experiment-diagram__annotations {
   margin: 0;
 }
 
-.experiment-overview__parameters > div {
-  min-inline-size: 0;
-  padding: var(--cds-spacing-04);
-  border-block-end: 1px solid var(--cds-border-subtle-01);
+.experiment-diagram__annotation {
+  min-inline-size: 7rem;
 }
 
-.experiment-overview__parameters > div:nth-child(odd) {
-  border-inline-end: 1px solid var(--cds-border-subtle-01);
+.experiment-diagram__annotation dt,
+.experiment-diagram__annotation dd {
+  margin: 0;
 }
 
-.experiment-overview__parameters dt {
-  color: var(--cds-text-secondary);
-  font-size: 0.75rem;
-  line-height: 1rem;
-}
-
-.experiment-overview__parameters dd {
-  display: grid;
-  grid-template-columns: auto auto;
+.experiment-diagram__annotation dd {
+  display: flex;
   align-items: baseline;
-  justify-content: start;
-  column-gap: var(--cds-spacing-03);
-  margin: var(--cds-spacing-03) 0 0;
+  gap: var(--scientific-ui-spacing-02);
+  margin-block-start: var(--scientific-ui-spacing-02);
   font-variant-numeric: tabular-nums;
 }
 
-.experiment-overview__parameters strong {
+.experiment-diagram__annotation strong {
   font-size: 1.25rem;
   font-weight: 400;
   line-height: 1.5rem;
 }
 
-.experiment-overview__parameters span {
-  color: var(--cds-text-secondary);
-  font-size: 0.75rem;
+.experiment-diagram__annotation--pulse {
+  inset-block-start: var(--scientific-ui-spacing-05);
+  inset-inline-end: var(--scientific-ui-spacing-05);
+}
+
+.experiment-diagram__annotation--intensity {
+  inset-block-start: 5rem;
+  inset-inline-end: var(--scientific-ui-spacing-05);
+}
+
+.experiment-diagram__annotation--waist {
+  inset-block-start: calc(34% - 4.25rem);
+  inset-inline-start: calc(50% + 5rem);
+}
+
+.experiment-diagram__annotation--wavelength {
+  inset-block-start: 57%;
+  inset-inline-start: calc(50% + 3.5rem);
+}
+
+.experiment-diagram__axis-label--radial {
+  inset-block-start: var(--scientific-ui-spacing-03);
+  inset-inline-start: calc(50% + var(--scientific-ui-spacing-03));
+}
+
+.experiment-diagram__axis-label--axial {
+  inset-block-start: calc(34% + 1rem);
+  inset-inline-end: var(--scientific-ui-spacing-05);
+}
+
+.experiment-diagram__caption {
+  inset-block-end: var(--scientific-ui-spacing-04);
+  inset-inline-end: var(--scientific-ui-spacing-05);
 }
 
 .validation-grid,
 .plot-grid {
-  row-gap: var(--cds-spacing-05);
+  row-gap: var(--scientific-ui-spacing-05);
 }
 
 .validation-grid {
-  padding-block: var(--cds-spacing-07);
+  padding-block: var(--scientific-ui-spacing-07);
 }
 
 .plot-grid {
-  padding-block-start: var(--cds-spacing-05);
+  padding-block-start: var(--scientific-ui-spacing-05);
 }
 
 .plot-loading {
   display: grid;
   min-height: 18rem;
   place-items: center;
-  padding: var(--cds-spacing-07);
+  padding: var(--scientific-ui-spacing-07);
   color: var(--cds-text-secondary);
 }
 
@@ -221,7 +301,7 @@ textarea {
   display: grid;
   min-width: 0;
   align-content: start;
-  gap: var(--cds-spacing-05);
+  gap: var(--scientific-ui-spacing-05);
 }
 
 .plot-column > * {
@@ -243,7 +323,7 @@ textarea {
 }
 
 .map-result > :first-child {
-  margin-block-end: var(--cds-spacing-03);
+  margin-block-end: var(--scientific-ui-spacing-03);
 }
 
 .scientific-plot-surface .modebar {
@@ -253,7 +333,7 @@ textarea {
 @media (max-width: 671px) {
   .validation-grid,
   .configuration-overview-grid {
-    padding-block: var(--cds-spacing-05);
+    padding-block: var(--scientific-ui-spacing-05);
   }
 
   .plot-surface,
@@ -261,17 +341,79 @@ textarea {
     height: 18rem;
   }
 
-  .experiment-overview__body {
-    grid-template-columns: minmax(0, 1fr);
+  .experiment-diagram {
+    min-block-size: 32rem;
+    max-block-size: none;
+    aspect-ratio: auto;
   }
 
-  .experiment-overview__schematic {
-    padding: var(--cds-spacing-04);
-    border-block-end: 1px solid var(--cds-border-subtle-01);
-    border-inline-end: 0;
+  .experiment-diagram__ambient {
+    block-size: 28%;
   }
 
-  .experiment-overview__parameters > div {
-    padding: var(--cds-spacing-04);
+  .experiment-diagram__film {
+    inset-block-start: 28%;
+  }
+
+  .experiment-diagram__substrate,
+  .experiment-diagram__beam {
+    inset-block-start: calc(28% + 0.75rem);
+  }
+
+  .experiment-diagram__beam {
+    inline-size: 92%;
+  }
+
+  .experiment-diagram__waist {
+    inset-block-start: calc(28% - 1.25rem);
+    inline-size: 6.5rem;
+  }
+
+  .experiment-diagram__material {
+    display: grid;
+    gap: 0;
+  }
+
+  .experiment-diagram__material--ambient {
+    inset-inline-start: var(--scientific-ui-spacing-04);
+  }
+
+  .experiment-diagram__material--film {
+    inset-block-start: calc(28% - 2.5rem);
+    inset-inline-start: var(--scientific-ui-spacing-04);
+  }
+
+  .experiment-diagram__material--substrate {
+    inset-block-start: calc(28% + var(--scientific-ui-spacing-05));
+    inset-inline-start: var(--scientific-ui-spacing-04);
+  }
+
+  .experiment-diagram__annotation--pulse,
+  .experiment-diagram__annotation--intensity {
+    inset-inline-end: var(--scientific-ui-spacing-04);
+  }
+
+  .experiment-diagram__annotation--waist {
+    inset-block-start: calc(28% + 4rem);
+    inset-inline-start: var(--scientific-ui-spacing-04);
+  }
+
+  .experiment-diagram__annotation--wavelength {
+    inset-block-start: calc(28% + 8rem);
+    inset-inline: auto var(--scientific-ui-spacing-04);
+  }
+
+  .experiment-diagram__axis-label--radial {
+    inset-block-start: calc(28% - 1.75rem);
+    inset-inline-start: calc(50% + var(--scientific-ui-spacing-03));
+  }
+
+  .experiment-diagram__axis-label--axial {
+    inset-block-start: calc(28% + var(--scientific-ui-spacing-03));
+    inset-inline-end: var(--scientific-ui-spacing-04);
+  }
+
+  .experiment-diagram__caption {
+    inset-inline: var(--scientific-ui-spacing-04) auto;
   }
 }

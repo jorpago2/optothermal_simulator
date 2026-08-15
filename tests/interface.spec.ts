@@ -21,7 +21,7 @@ test("configuration shell remains usable across Carbon breakpoints", async ({ pa
     await expect(page.getByRole("link", { name: "Optothermal Simulator" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Single-position model" })).toBeVisible();
     if (viewport.width >= 1056) {
-      await expect(page.getByRole("img", { name: "Axisymmetric optothermal experiment" })).toBeVisible();
+      await expect(page.getByRole("img", { name: /Optical stack and beam/ })).toBeVisible();
     }
     await expect(page.getByRole("button", { name: "Run simulation" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Optical and phase model" })).toHaveAttribute("aria-expanded", "false");
@@ -33,6 +33,9 @@ test("configuration shell remains usable across Carbon breakpoints", async ({ pa
       await page.waitForTimeout(100);
       expect(await panelBody.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
       expect(await panel.evaluate((element) => element.scrollTop)).toBe(0);
+      await page.getByRole("button", { name: "Close configuration" }).click();
+      await expect(page.getByRole("heading", { name: "Optical stack and beam" })).toBeVisible();
+      await expect(page.locator('.scientific-tool-rail__item[aria-current="page"]')).toContainText("Configure");
     }
     const fit = await page.evaluate(() => ({
       viewport: document.documentElement.clientWidth,
@@ -55,13 +58,21 @@ test("run overview presents the experiment visually and updates with the configu
   const waist = page.getByLabel("Beam waist w₀ in µm");
   await waist.fill("15");
   await waist.press("Enter");
-  await expect(page.locator(".experiment-schematic__annotation").filter({ hasText: "w₀ = 15 µm" })).toBeVisible();
+  await expect(page.locator(".experiment-diagram__annotation--waist")).toContainText("15µm");
+
+  const [diagramBounds, overviewBounds] = await Promise.all([
+    page.locator(".experiment-diagram").boundingBox(),
+    page.locator(".experiment-overview").boundingBox(),
+  ]);
+  expect(Math.abs((diagramBounds?.width ?? 0) - (overviewBounds?.width ?? 0))).toBeLessThanOrEqual(1);
 
   const cards = page.locator(".scientific-evidence-summary__checks > li");
   await expect(cards).toHaveCount(4);
   const rows = await cards.evaluateAll((elements) => elements.map((element) => Math.round(element.getBoundingClientRect().top)));
   expect(new Set(rows).size).toBe(1);
   await expect(page.getByText("All required values are finite and within solver limits.")).toHaveCount(0);
+  const checksBounds = await page.locator(".scientific-evidence-summary").boundingBox();
+  expect(diagramBounds?.height ?? 0).toBeGreaterThan((checksBounds?.height ?? 0) * 2);
 });
 
 test("reference simulation produces plots, validation evidence and export", async ({ page }) => {
