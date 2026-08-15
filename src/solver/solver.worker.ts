@@ -3,12 +3,18 @@
 import { runWasmSimulation } from "./wasmCore";
 import type { OptothermalConfig } from "./types";
 
-self.onmessage = async (event: MessageEvent<OptothermalConfig>) => {
+interface WorkerRequest {
+  requestId: string;
+  config: OptothermalConfig;
+}
+
+self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
+  const { requestId, config } = event.data;
   try {
-    const result = await runWasmSimulation(event.data);
-    self.postMessage({ ok: true, result });
+    const result = await runWasmSimulation(config);
+    self.postMessage({ requestId, ok: true, result });
   } catch (error) {
-    self.postMessage({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    self.postMessage({ requestId, ok: false, error: error instanceof Error ? error.message : String(error) });
   }
 };
 

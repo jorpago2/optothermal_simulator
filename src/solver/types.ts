@@ -49,13 +49,35 @@ export interface OptothermalResult {
     absorbedEnergyJ: number;
     maximumStoredEnergyJ: number;
     averageLinearIterations: number;
+    maximumLinearIterations: number;
+    worstLinearUpdateK: number;
+    worstLinearResidual: number;
+    worstLinearStep: number;
+    linearUpdateToleranceK: number;
+    linearResidualTolerance: number;
+    linearConverged: boolean;
     storedToAbsorbedRatio: number;
     baselineAbsorptance: number;
+    baselineReflectance: number;
+    baselineTransmittance: number;
+    baselineAbsorptanceRaw: number;
+    minimumAbsorptanceRaw: number;
+    maximumAbsorptanceRaw: number;
+    minimumStoredEnergyJ: number;
     adiabaticTemperatureRiseK: number;
     timeStepNs: number;
     peakFluenceJM2: number;
   };
   engine: "Rust/WASM";
+}
+
+export interface ResultValidation {
+  schema: boolean;
+  finite: boolean;
+  physicalRanges: boolean;
+  passive: boolean;
+  energyBound: boolean;
+  converged: boolean;
 }
 
 export interface ValidationIssue {

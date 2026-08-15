@@ -1,4 +1,16 @@
-import type { OptothermalConfig, OptothermalResult, ValidationIssue } from "./types";
+import type { OptothermalConfig, OptothermalResult, ResultValidation, ValidationIssue } from "./types";
+
+const OPTICAL_POWER_TOLERANCE = 1e-9;
+const NEGATIVE_ENERGY_TOLERANCE_J = 1e-18;
+
+export interface MeshDiagnostics {
+  radialSpacingUm: number;
+  pointsPerWaist: number;
+  substrateSpacingUm: number;
+  substrateDiffusionLengthUm: number;
+  cellsPerSubstrateDiffusionLength: number;
+  filmDiffusionLengthNm: number;
+}
 
 const finitePositiveFields: Array<keyof OptothermalConfig> = [
   "wavelengthUm", "waistUm", "peakIntensityGwCm2", "pulseFwhmNs", "durationNs",
@@ -7,6 +19,26 @@ const finitePositiveFields: Array<keyof OptothermalConfig> = [
   "phaseRelaxationNs", "filmDensityKgM3", "filmHeatCapacityJKgK", "filmConductivityWMK",
   "substrateDensityKgM3", "substrateHeatCapacityJKgK", "substrateConductivityWMK",
 ];
+
+export function getMeshDiagnostics(config: OptothermalConfig): MeshDiagnostics {
+  const radialSpacingUm = config.radiusUm / Math.max(1, config.radialCells - 1);
+  const pointsPerWaist = config.waistUm / radialSpacingUm;
+  const substrateSpacingUm = config.substrateDepthUm / config.substrateCells;
+  const substrateDiffusivityM2S = config.substrateConductivityWMK
+    / (config.substrateDensityKgM3 * config.substrateHeatCapacityJKgK);
+  const substrateDiffusionLengthUm = Math.sqrt(substrateDiffusivityM2S * config.pulseFwhmNs * 1e-9) * 1e6;
+  const cellsPerSubstrateDiffusionLength = substrateDiffusionLengthUm / substrateSpacingUm;
+  const filmDiffusivityM2S = config.filmConductivityWMK / (config.filmDensityKgM3 * config.filmHeatCapacityJKgK);
+  const filmDiffusionLengthNm = Math.sqrt(filmDiffusivityM2S * config.pulseFwhmNs * 1e-9) * 1e9;
+  return {
+    radialSpacingUm,
+    pointsPerWaist,
+    substrateSpacingUm,
+    substrateDiffusionLengthUm,
+    cellsPerSubstrateDiffusionLength,
+    filmDiffusionLengthNm,
+  };
+}
 
 export function validateConfig(config: OptothermalConfig): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
@@ -42,13 +74,93 @@ export function validateConfig(config: OptothermalConfig): ValidationIssue[] {
   if (config.transitionCoolingC >= config.transitionHeatingC) {
     issues.push({ id: "hysteresis-order", severity: "error", field: "transitionCoolingC", message: "The cooling transition must be below the heating transition." });
   }
+  const { pointsPerWaist, cellsPerSubstrateDiffusionLength, filmDiffusionLengthNm } = getMeshDiagnostics(config);
+  if (pointsPerWaist < 2) {
+    issues.push({ id: "radial-source-unresolved", severity: "error", field: "radialCells", message: `The Gaussian waist spans only ${pointsPerWaist.toFixed(2)} radial intervals; use at least 2 to avoid source aliasing.` });
+  } else if (pointsPerWaist < 8) {
+    issues.push({ id: "radial-source-resolution", severity: "warning", field: "radialCells", message: `The Gaussian waist spans ${pointsPerWaist.toFixed(2)} radial intervals; use at least 8 for quantitative work.` });
+  }
+  if (cellsPerSubstrateDiffusionLength < 0.01) {
+    issues.push({ id: "substrate-diffusion-unresolved", severity: "error", field: "substrateCells", message: `The substrate diffusion length spans only ${cellsPerSubstrateDiffusionLength.toExponential(2)} cells; this mesh cannot represent the near-interface gradient.` });
+  } else if (cellsPerSubstrateDiffusionLength < 4) {
+    issues.push({ id: "substrate-diffusion-resolution", severity: "warning", field: "substrateCells", message: `The substrate diffusion length spans ${cellsPerSubstrateDiffusionLength.toFixed(2)} cells; use at least 4 for quantitative work.` });
+  }
+  if (config.filmThicknessNm > filmDiffusionLengthNm) {
+    issues.push({ id: "film-lumped-resolution", severity: "warning", field: "filmThicknessNm", message: `The film is represented by one control volume although its thickness is ${config.filmThicknessNm.toPrecision(3)} nm and its pulse diffusion length is ${filmDiffusionLengthNm.toPrecision(3)} nm.` });
+  }
   return issues;
 }
 
-export function validateResult(result: OptothermalResult) {
-  const finite = result.centerTemperatureC.every(Number.isFinite)
-    && result.peakTemperatureMapC.every((row) => row.every(Number.isFinite));
-  const passive = result.metrics.baselineAbsorptance >= 0 && result.metrics.peakAbsorptance <= 1;
-  const energyBound = result.metrics.storedToAbsorbedRatio >= 0 && result.metrics.storedToAbsorbedRatio <= 1.02;
-  return { finite, passive, energyBound };
+function everyFinite(values: number[]): boolean {
+  return values.every(Number.isFinite);
+}
+
+function flattenMatrix(values: number[][]): number[] {
+  return values.flatMap((row) => row);
+}
+
+export function validateResult(result: OptothermalResult): ResultValidation {
+  const nt = result.timeNs.length;
+  const nr = result.radiusUm.length;
+  const nz = result.depthUm.length;
+  const schema = nt >= 2 && nr >= 2 && nz >= 2
+    && result.centerTemperatureC.length === nt
+    && result.centerMetallicFraction.length === nt
+    && result.centerAbsorptance.length === nt
+    && result.finalSurfaceTemperatureC.length === nr
+    && result.peakSurfaceTemperatureC.length === nr
+    && result.finalTemperatureMapC.length === nz
+    && result.peakTemperatureMapC.length === nz
+    && result.finalTemperatureMapC.every((row) => row.length === nr)
+    && result.peakTemperatureMapC.every((row) => row.length === nr);
+  const arrays = [
+    result.timeNs,
+    result.centerTemperatureC,
+    result.centerMetallicFraction,
+    result.centerAbsorptance,
+    result.radiusUm,
+    result.finalSurfaceTemperatureC,
+    result.peakSurfaceTemperatureC,
+    result.depthUm,
+    flattenMatrix(result.finalTemperatureMapC),
+    flattenMatrix(result.peakTemperatureMapC),
+  ];
+  const numericMetrics = Object.values(result.metrics).filter((value): value is number => typeof value === "number");
+  const finite = arrays.every(everyFinite) && numericMetrics.every(Number.isFinite);
+  const temperatureValues = [
+    ...result.centerTemperatureC,
+    ...result.finalSurfaceTemperatureC,
+    ...result.peakSurfaceTemperatureC,
+    ...flattenMatrix(result.finalTemperatureMapC),
+    ...flattenMatrix(result.peakTemperatureMapC),
+  ];
+  const physicalRanges = temperatureValues.every((value) => value >= -273.15)
+    && result.centerMetallicFraction.every((value) => value >= 0 && value <= 1)
+    && result.centerAbsorptance.every((value) => value >= 0 && value <= 1);
+  const opticalBalanceDefect = result.metrics.baselineReflectance
+    + result.metrics.baselineTransmittance
+    + result.metrics.baselineAbsorptanceRaw - 1;
+  const passive = Math.abs(opticalBalanceDefect) <= OPTICAL_POWER_TOLERANCE
+    && result.metrics.baselineReflectance >= -OPTICAL_POWER_TOLERANCE
+    && result.metrics.baselineTransmittance >= -OPTICAL_POWER_TOLERANCE
+    && result.metrics.minimumAbsorptanceRaw >= -OPTICAL_POWER_TOLERANCE
+    && result.metrics.maximumAbsorptanceRaw <= 1 + OPTICAL_POWER_TOLERANCE;
+  const energyBound = result.metrics.minimumStoredEnergyJ >= -NEGATIVE_ENERGY_TOLERANCE_J
+    && result.metrics.storedToAbsorbedRatio >= 0
+    && result.metrics.storedToAbsorbedRatio <= 1.02;
+  const converged = result.metrics.linearConverged
+    && result.metrics.maximumLinearIterations > 0
+    && result.metrics.worstLinearUpdateK <= result.metrics.linearUpdateToleranceK
+    && result.metrics.worstLinearResidual <= result.metrics.linearResidualTolerance;
+  return { schema, finite, physicalRanges, passive, energyBound, converged };
+}
+
+export function assertValidResult(config: OptothermalConfig, result: OptothermalResult): void {
+  const dimensionsMatch = result.timeNs.length === config.timeSteps
+    && result.radiusUm.length === config.radialCells
+    && result.depthUm.length === config.substrateCells + 1;
+  if (!dimensionsMatch) throw new Error("The solver result dimensions do not match the requested configuration.");
+  const checks = validateResult(result);
+  const failures = Object.entries(checks).filter(([, passed]) => !passed).map(([name]) => name);
+  if (failures.length) throw new Error(`The solver result failed validation: ${failures.join(", ")}.`);
 }

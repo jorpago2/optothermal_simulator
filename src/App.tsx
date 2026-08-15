@@ -38,7 +38,7 @@ import { ExperimentOverview } from "./components/ExperimentOverview";
 import { VO2_REFERENCE_CONFIG } from "./solver/defaults";
 import { cancelActiveSimulation, runSimulation } from "./solver/workerClient";
 import type { OptothermalConfig, OptothermalResult } from "./solver/types";
-import { validateConfig, validateResult } from "./solver/validation";
+import { getMeshDiagnostics, validateConfig, validateResult } from "./solver/validation";
 
 type AppView = "configure" | "results" | "validation";
 type MapView = "peak" | "final";
@@ -61,9 +61,9 @@ function cloneReferenceConfig(): OptothermalConfig {
 
 function downloadJson(config: OptothermalConfig, result: OptothermalResult) {
   const content = JSON.stringify({
-    schema: "optothermal-simulator/result@1",
+    schema: "optothermal-simulator/result@2",
     generatedAt: new Date().toISOString(),
-    model: "axisymmetric-rz-local-tmm-thermal@0.1",
+    model: "axisymmetric-rz-local-tmm-thermal@0.2",
     config,
     result,
   }, null, 2);
@@ -128,7 +128,9 @@ export function App() {
       setLastRunConfig({ ...config });
       setRuntimeMs(performance.now() - started);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(cause instanceof DOMException && cause.name === "AbortError"
+        ? "Simulation cancelled."
+        : cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
     }
@@ -184,10 +186,14 @@ export function App() {
   const preflightChecks = useMemo<ScientificCheckDescriptor[]>(() => {
     const pointsPerFwhm = config.timeSteps * config.pulseFwhmNs / config.durationNs;
     const meshCells = config.radialCells * (config.substrateCells + 1);
+    const mesh = getMeshDiagnostics(config);
     return [
       { id: "input", label: "Parameter ranges", state: runBlocked ? "failed" : "passed", detail: hasInvalidFields ? "A visible field contains an uncommitted invalid value." : hasErrors ? "Correct the blocking input messages." : "All required values are finite and within solver limits." },
       { id: "time", label: "Pulse resolution", state: pointsPerFwhm >= 16 ? "passed" : "warning", value: `${pointsPerFwhm.toFixed(1)} points/FWHM`, detail: "Implicit integration removes a stability restriction but not temporal discretization error." },
       { id: "radius", label: "Radial boundary", state: config.radiusUm >= 4 * config.waistUm ? "passed" : "warning", value: `${(config.radiusUm / config.waistUm).toFixed(1)} w₀`, detail: "A boundary at four beam waists limits interaction with the heated region." },
+      { id: "source-mesh", label: "Gaussian source resolution", state: mesh.pointsPerWaist < 2 ? "failed" : mesh.pointsPerWaist < 8 ? "warning" : "passed", value: `${mesh.pointsPerWaist.toFixed(2)} cells/w₀`, detail: `Radial spacing ${mesh.radialSpacingUm.toPrecision(3)} µm; at least 8 intervals per waist are recommended for quantitative work.` },
+      { id: "depth-mesh", label: "Substrate diffusion resolution", state: mesh.cellsPerSubstrateDiffusionLength < 0.01 ? "failed" : mesh.cellsPerSubstrateDiffusionLength < 4 ? "warning" : "passed", value: `${mesh.cellsPerSubstrateDiffusionLength.toPrecision(3)} cells/Ld`, detail: `Depth spacing ${mesh.substrateSpacingUm.toPrecision(3)} µm; pulse diffusion length ${mesh.substrateDiffusionLengthUm.toPrecision(3)} µm.` },
+      { id: "film-mesh", label: "Film control volume", state: config.filmThicknessNm > mesh.filmDiffusionLengthNm ? "warning" : "passed", value: `1 cell · Ld ${mesh.filmDiffusionLengthNm.toPrecision(3)} nm`, detail: "The current model treats the entire film thickness as one thermal control volume." },
       { id: "mesh", label: "Browser mesh", state: meshCells <= 40_000 ? "passed" : "failed", value: `${meshCells.toLocaleString()} cells`, detail: "The hard limit bounds worker memory and interaction latency." },
     ];
   }, [config, hasErrors, hasInvalidFields, runBlocked]);
@@ -198,8 +204,11 @@ export function App() {
     ];
     const checks = validateResult(result);
     return [
+      { id: "schema", label: "Result schema", state: checks.schema ? "passed" : "failed", detail: "All arrays must match the requested r–z mesh and time axis." },
       { id: "finite", label: "Finite solution", state: checks.finite ? "passed" : "failed", detail: "All temporal and spatial temperature samples must remain finite." },
-      { id: "passive", label: "Optical passivity", state: checks.passive ? "passed" : "failed", value: `A = ${result.metrics.baselineAbsorptance.toFixed(4)}–${result.metrics.peakAbsorptance.toFixed(4)}`, detail: "The local TMM stack must satisfy 0 ≤ A ≤ 1." },
+      { id: "ranges", label: "Physical ranges", state: checks.physicalRanges ? "passed" : "failed", detail: "Temperature, phase fraction and absorptance must remain in their supported ranges." },
+      { id: "linear", label: "Linear convergence", state: checks.converged ? "passed" : "failed", value: `r = ${result.metrics.worstLinearResidual.toExponential(2)}`, detail: `Worst step ${result.metrics.worstLinearStep}; ${result.metrics.maximumLinearIterations} maximum iterations; tolerance ${result.metrics.linearResidualTolerance.toExponential(1)}.` },
+      { id: "passive", label: "Optical passivity", state: checks.passive ? "passed" : "failed", value: `Araw = ${result.metrics.minimumAbsorptanceRaw.toFixed(4)}–${result.metrics.maximumAbsorptanceRaw.toFixed(4)}`, detail: `Raw baseline balance: R ${result.metrics.baselineReflectance.toFixed(5)} + T ${result.metrics.baselineTransmittance.toFixed(5)} + A ${result.metrics.baselineAbsorptanceRaw.toFixed(5)}.` },
       { id: "energy", label: "Thermal energy bound", state: checks.energyBound ? "passed" : "failed", value: `${(100 * result.metrics.storedToAbsorbedRatio).toFixed(2)}% stored/absorbed`, detail: "Stored sensible heat cannot exceed integrated absorbed optical energy." },
       { id: "convergence", label: "Mesh convergence", state: "warning", detail: "A refinement comparison has not been run. Treat quantitative values as provisional." },
     ];
@@ -208,7 +217,7 @@ export function App() {
   const validationPassed = result ? validateResult(result) : undefined;
   const validationStatus: ScientificStatusDescriptor = !result
     ? { state: "needs-input", label: "Not evaluated" }
-    : validationPassed && validationPassed.finite && validationPassed.passive && validationPassed.energyBound
+    : validationPassed && Object.values(validationPassed).every(Boolean)
       ? { state: "warning", label: "Core checks passed; convergence pending" }
       : { state: "failed", label: "Validation check failed" };
 
@@ -358,10 +367,12 @@ export function App() {
                     status={modified ? { state: "modified", label: "Inputs changed after run" } : { state: "up-to-date", label: "Manifest current" }}
                     items={[
                       { id: "engine", label: "Engine", value: result.engine },
-                      { id: "model", label: "Model", value: "axisymmetric-rz-local-tmm-thermal@0.1" },
+                      { id: "model", label: "Model", value: "axisymmetric-rz-local-tmm-thermal@0.2" },
                       { id: "mesh", label: "Mesh", value: `${lastRunConfig.radialCells} × ${lastRunConfig.substrateCells + 1} cells; ${lastRunConfig.timeSteps} time samples` },
                       { id: "timestep", label: "Time step", value: `${result.metrics.timeStepNs.toPrecision(5)} ns` },
                       { id: "iterations", label: "Mean implicit iterations", value: result.metrics.averageLinearIterations.toFixed(2) },
+                      { id: "worst-residual", label: "Worst linear residual", value: `${result.metrics.worstLinearResidual.toExponential(4)} at step ${result.metrics.worstLinearStep}` },
+                      { id: "raw-balance", label: "Baseline R/T/Araw", value: `${result.metrics.baselineReflectance.toPrecision(5)} / ${result.metrics.baselineTransmittance.toPrecision(5)} / ${result.metrics.baselineAbsorptanceRaw.toPrecision(5)}` },
                     ]}
                   />
                 </Column>

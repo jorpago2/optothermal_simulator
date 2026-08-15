@@ -1,8 +1,13 @@
 use std::{mem, slice};
 
 const CONFIG_LENGTH: usize = 30;
-const HEADER_LENGTH: usize = 16;
+const HEADER_LENGTH: usize = 29;
 const MAX_CELLS: usize = 40_000;
+const MAX_LINEAR_ITERATIONS: usize = 80;
+const LINEAR_UPDATE_TOLERANCE_K: f64 = 1.0e-7;
+const LINEAR_RESIDUAL_TOLERANCE: f64 = 1.0e-9;
+const OPTICAL_POWER_TOLERANCE: f64 = 1.0e-9;
+const NEGATIVE_ENERGY_TOLERANCE_J: f64 = 1.0e-18;
 
 #[derive(Clone, Copy)]
 struct Complex {
@@ -35,6 +40,21 @@ impl Complex {
 struct Material {
     conductivity: f64,
     volumetric_heat_capacity: f64,
+}
+
+#[derive(Clone, Copy)]
+struct LinearSolveReport {
+    converged: bool,
+    iterations: usize,
+    maximum_update_k: f64,
+    residual_norm: f64,
+}
+
+#[derive(Clone, Copy)]
+struct OpticalPower {
+    reflectance: f64,
+    transmittance: f64,
+    absorptance_raw: f64,
 }
 
 struct Config {
@@ -140,11 +160,15 @@ pub unsafe extern "C" fn run_simulation(
     let required = output_length(config.time_steps, config.radial_cells, config.substrate_cells);
     if output_capacity < required { return 5; }
     let output = slice::from_raw_parts_mut(output_pointer, required);
-    simulate(&config, output);
-    0
+    output.fill(f64::NAN);
+    output[0] = 2.0;
+    output[1] = config.time_steps as f64;
+    output[2] = config.radial_cells as f64;
+    output[3] = (config.substrate_cells + 1) as f64;
+    match simulate(&config, output) { Ok(()) => 0, Err(code) => code }
 }
 
-fn simulate(config: &Config, output: &mut [f64]) {
+fn simulate(config: &Config, output: &mut [f64]) -> Result<(), i32> {
     let nt = config.time_steps;
     let nr = config.radial_cells;
     let nz = config.substrate_cells + 1;
@@ -179,7 +203,9 @@ fn simulate(config: &Config, output: &mut [f64]) {
     }
     output[depth_offset + nz - 1] = 0.5 * config.film_thickness_m * 1.0e6;
 
-    let baseline_absorption = thin_film_absorptance(config, config.insulating_index);
+    let baseline_optical_power = thin_film_power(config, config.insulating_index);
+    if !optical_power_is_valid(baseline_optical_power) { return Err(7); }
+    let baseline_absorption = baseline_optical_power.absorptance_raw.clamp(0.0, 1.0);
     let mut maximum_temperature = config.ambient_k;
     let mut maximum_time = 0.0;
     let mut maximum_phase: f64 = 0.0;
@@ -187,6 +213,13 @@ fn simulate(config: &Config, output: &mut [f64]) {
     let mut absorbed_energy = 0.0;
     let mut maximum_stored_energy: f64 = 0.0;
     let mut total_iterations = 0usize;
+    let mut maximum_linear_iterations = 0usize;
+    let mut worst_linear_update_k: f64 = 0.0;
+    let mut worst_linear_residual: f64 = 0.0;
+    let mut worst_linear_step = 0usize;
+    let mut minimum_absorptance_raw = baseline_optical_power.absorptance_raw;
+    let mut maximum_absorptance_raw = baseline_optical_power.absorptance_raw;
+    let mut minimum_stored_energy: f64 = 0.0;
 
     output[time_offset] = 0.0;
     output[center_temperature_offset] = config.ambient_k - 273.15;
@@ -202,23 +235,32 @@ fn simulate(config: &Config, output: &mut [f64]) {
 
         for i in 0..nr {
             let optical_index = interpolate_complex(config.insulating_index, config.metallic_index, phase[i]);
-            absorption[i] = thin_film_absorptance(config, optical_index);
+            let optical_power = thin_film_power(config, optical_index);
+            if !optical_power_is_valid(optical_power) { return Err(7); }
+            minimum_absorptance_raw = minimum_absorptance_raw.min(optical_power.absorptance_raw);
+            maximum_absorptance_raw = maximum_absorptance_raw.max(optical_power.absorptance_raw);
+            absorption[i] = optical_power.absorptance_raw.clamp(0.0, 1.0);
             peak_absorption = peak_absorption.max(absorption[i]);
             let radius = i as f64 * dr;
             let spatial = (-2.0 * (radius / config.waist_m).powi(2)).exp();
             let incident = config.peak_intensity_w_m2 * spatial * temporal;
-            source[i] = incident * absorption[i] / config.film_thickness_m;
-            let annulus_area = if i == 0 {
-                std::f64::consts::PI * (0.5 * dr).powi(2)
-            } else {
-                2.0 * std::f64::consts::PI * radius * dr
-            };
+            source[i] = if i == nr - 1 { 0.0 } else { incident * absorption[i] / config.film_thickness_m };
+            let annulus_area = radial_annulus_area(i, nr, dr);
             absorbed_energy += incident * absorption[i] * annulus_area * dt;
         }
 
         current.copy_from_slice(&previous);
-        let iterations = implicit_step(config, &previous, &mut current, &source, dt, dr, substrate_dz);
-        total_iterations += iterations;
+        let linear_report = implicit_step(config, &previous, &mut current, &source, dt, dr, substrate_dz);
+        total_iterations += linear_report.iterations;
+        maximum_linear_iterations = maximum_linear_iterations.max(linear_report.iterations);
+        if linear_report.residual_norm >= worst_linear_residual {
+            worst_linear_residual = linear_report.residual_norm;
+            worst_linear_update_k = linear_report.maximum_update_k;
+            worst_linear_step = step;
+        }
+        write_linear_diagnostics(output, linear_report.converged, maximum_linear_iterations,
+            worst_linear_update_k, worst_linear_residual, worst_linear_step);
+        if !linear_report.converged { return Err(6); }
 
         for i in 0..nr {
             let index = (nz - 1) * nr + i;
@@ -239,15 +281,20 @@ fn simulate(config: &Config, output: &mut [f64]) {
             maximum_time = time;
         }
         for index in 0..cell_count { peak[index] = peak[index].max(current[index]); }
-        maximum_stored_energy = maximum_stored_energy.max(stored_energy(config, &current, dr, substrate_dz));
+        let stored_energy_j = stored_energy(config, &current, dr, substrate_dz);
+        if !stored_energy_j.is_finite() || stored_energy_j < -NEGATIVE_ENERGY_TOLERANCE_J { return Err(8); }
+        minimum_stored_energy = minimum_stored_energy.min(stored_energy_j);
+        maximum_stored_energy = maximum_stored_energy.max(stored_energy_j);
 
         output[time_offset + step] = time * 1.0e9;
         output[center_temperature_offset + step] = center_temperature - 273.15;
         output[center_phase_offset + step] = phase[0];
-        output[center_absorption_offset + step] = thin_film_absorptance(
+        let center_optical_power = thin_film_power(
             config,
             interpolate_complex(config.insulating_index, config.metallic_index, phase[0]),
         );
+        if !optical_power_is_valid(center_optical_power) { return Err(7); }
+        output[center_absorption_offset + step] = center_optical_power.absorptance_raw.clamp(0.0, 1.0);
         previous.copy_from_slice(&current);
     }
 
@@ -267,10 +314,6 @@ fn simulate(config: &Config, output: &mut [f64]) {
         * (std::f64::consts::PI / (4.0 * std::f64::consts::LN_2)).sqrt();
     let adiabatic_rise = baseline_absorption * pulse_fluence
         / (config.film.volumetric_heat_capacity * config.film_thickness_m);
-    output[0] = 1.0;
-    output[1] = nt as f64;
-    output[2] = nr as f64;
-    output[3] = nz as f64;
     output[4] = maximum_temperature - 273.15;
     output[5] = maximum_time * 1.0e9;
     output[6] = maximum_phase;
@@ -283,6 +326,32 @@ fn simulate(config: &Config, output: &mut [f64]) {
     output[13] = adiabatic_rise;
     output[14] = dt * 1.0e9;
     output[15] = pulse_fluence;
+    write_linear_diagnostics(output, true, maximum_linear_iterations, worst_linear_update_k,
+        worst_linear_residual, worst_linear_step);
+    output[23] = baseline_optical_power.reflectance;
+    output[24] = baseline_optical_power.transmittance;
+    output[25] = baseline_optical_power.absorptance_raw;
+    output[26] = minimum_absorptance_raw;
+    output[27] = maximum_absorptance_raw;
+    output[28] = minimum_stored_energy;
+    Ok(())
+}
+
+fn write_linear_diagnostics(
+    output: &mut [f64],
+    converged: bool,
+    maximum_iterations: usize,
+    worst_update_k: f64,
+    worst_residual: f64,
+    worst_step: usize,
+) {
+    output[16] = if converged { 1.0 } else { 0.0 };
+    output[17] = maximum_iterations as f64;
+    output[18] = worst_update_k;
+    output[19] = worst_residual;
+    output[20] = worst_step as f64;
+    output[21] = LINEAR_UPDATE_TOLERANCE_K;
+    output[22] = LINEAR_RESIDUAL_TOLERANCE;
 }
 
 fn implicit_step(
@@ -293,76 +362,152 @@ fn implicit_step(
     dt: f64,
     dr: f64,
     substrate_dz: f64,
-) -> usize {
+) -> LinearSolveReport {
     let nr = config.radial_cells;
     let nz = config.substrate_cells + 1;
-    let maximum_iterations = 80usize;
-    let tolerance = 1.0e-7;
-    for iteration in 0..maximum_iterations {
+    let mut final_update_k = f64::INFINITY;
+    let mut final_residual_norm = f64::INFINITY;
+    for iteration in 0..MAX_LINEAR_ITERATIONS {
         let mut maximum_change: f64 = 0.0;
         for layer in 0..nz {
-            let material = if layer == nz - 1 { config.film } else { config.substrate };
-            let dz = if layer == nz - 1 { config.film_thickness_m } else { substrate_dz };
-            let alpha = material.conductivity / material.volumetric_heat_capacity;
             for i in 0..nr {
                 let index = layer * nr + i;
-                let mut diagonal_rate = 0.0;
-                let mut neighbour_rate = 0.0;
-                if nr > 1 {
-                    if i == 0 {
-                        let coefficient = 4.0 * alpha / (dr * dr);
-                        diagonal_rate += coefficient;
-                        neighbour_rate += coefficient * current[index + 1];
-                    } else {
-                        let radius = i as f64 * dr;
-                        let minus = alpha * (1.0 / (dr * dr) - 1.0 / (2.0 * radius * dr));
-                        let plus = alpha * (1.0 / (dr * dr) + 1.0 / (2.0 * radius * dr));
-                        diagonal_rate += minus + plus;
-                        neighbour_rate += minus * current[index - 1];
-                        if i < nr - 1 { neighbour_rate += plus * current[index + 1]; }
-                    }
+                if i == nr - 1 {
+                    maximum_change = maximum_change.max(current[index].abs());
+                    current[index] = 0.0;
+                    continue;
                 }
-                if layer > 0 {
-                    let below_material = if layer - 1 == nz - 1 { config.film } else { config.substrate };
-                    let below_dz = if layer - 1 == nz - 1 { config.film_thickness_m } else { substrate_dz };
-                    let conductance = interface_conductance(material.conductivity, dz, below_material.conductivity, below_dz);
-                    let coefficient = conductance / (material.volumetric_heat_capacity * dz);
-                    diagonal_rate += coefficient;
-                    neighbour_rate += coefficient * current[index - nr];
-                } else {
-                    let coefficient = 2.0 * material.conductivity / (material.volumetric_heat_capacity * dz * dz);
-                    diagonal_rate += coefficient;
-                }
-                if layer + 1 < nz {
-                    let above_material = if layer + 1 == nz - 1 { config.film } else { config.substrate };
-                    let above_dz = if layer + 1 == nz - 1 { config.film_thickness_m } else { substrate_dz };
-                    let conductance = interface_conductance(material.conductivity, dz, above_material.conductivity, above_dz);
-                    let coefficient = conductance / (material.volumetric_heat_capacity * dz);
-                    diagonal_rate += coefficient;
-                    neighbour_rate += coefficient * current[index + nr];
-                } else {
-                    diagonal_rate += config.h_air_w_m2k / (material.volumetric_heat_capacity * dz);
-                }
-                let source_rate = if layer == nz - 1 { film_source[i] / material.volumetric_heat_capacity } else { 0.0 };
+                let (diagonal_rate, neighbour_rate, source_rate) = cell_rates(
+                    config, current, film_source, layer, i, dr, substrate_dz,
+                );
                 let next = (previous[index] + dt * (source_rate + neighbour_rate)) / (1.0 + dt * diagonal_rate);
                 maximum_change = maximum_change.max((next - current[index]).abs());
                 current[index] = next;
             }
         }
-        if maximum_change < tolerance { return iteration + 1; }
+        let residual_norm = linear_residual_norm(config, previous, current, film_source, dt, dr, substrate_dz);
+        final_update_k = maximum_change;
+        final_residual_norm = residual_norm;
+        if maximum_change <= LINEAR_UPDATE_TOLERANCE_K && residual_norm <= LINEAR_RESIDUAL_TOLERANCE {
+            return LinearSolveReport {
+                converged: true,
+                iterations: iteration + 1,
+                maximum_update_k: maximum_change,
+                residual_norm,
+            };
+        }
     }
-    maximum_iterations
+    LinearSolveReport {
+        converged: false,
+        iterations: MAX_LINEAR_ITERATIONS,
+        maximum_update_k: final_update_k,
+        residual_norm: final_residual_norm,
+    }
+}
+
+fn cell_rates(
+    config: &Config,
+    current: &[f64],
+    film_source: &[f64],
+    layer: usize,
+    i: usize,
+    dr: f64,
+    substrate_dz: f64,
+) -> (f64, f64, f64) {
+    let nr = config.radial_cells;
+    let nz = config.substrate_cells + 1;
+    let index = layer * nr + i;
+    let material = if layer == nz - 1 { config.film } else { config.substrate };
+    let dz = if layer == nz - 1 { config.film_thickness_m } else { substrate_dz };
+    let alpha = material.conductivity / material.volumetric_heat_capacity;
+    let mut diagonal_rate = 0.0;
+    let mut neighbour_rate = 0.0;
+    if i == 0 {
+        let coefficient = 4.0 * alpha / (dr * dr);
+        diagonal_rate += coefficient;
+        neighbour_rate += coefficient * current[index + 1];
+    } else {
+        let radius = i as f64 * dr;
+        let minus = alpha * (1.0 / (dr * dr) - 1.0 / (2.0 * radius * dr));
+        let plus = alpha * (1.0 / (dr * dr) + 1.0 / (2.0 * radius * dr));
+        diagonal_rate += minus + plus;
+        neighbour_rate += minus * current[index - 1];
+        if i < nr - 1 { neighbour_rate += plus * current[index + 1]; }
+    }
+    if layer > 0 {
+        let below_material = if layer - 1 == nz - 1 { config.film } else { config.substrate };
+        let below_dz = if layer - 1 == nz - 1 { config.film_thickness_m } else { substrate_dz };
+        let conductance = interface_conductance(material.conductivity, dz, below_material.conductivity, below_dz);
+        let coefficient = conductance / (material.volumetric_heat_capacity * dz);
+        diagonal_rate += coefficient;
+        neighbour_rate += coefficient * current[index - nr];
+    } else {
+        diagonal_rate += 2.0 * material.conductivity / (material.volumetric_heat_capacity * dz * dz);
+    }
+    if layer + 1 < nz {
+        let above_material = if layer + 1 == nz - 1 { config.film } else { config.substrate };
+        let above_dz = if layer + 1 == nz - 1 { config.film_thickness_m } else { substrate_dz };
+        let conductance = interface_conductance(material.conductivity, dz, above_material.conductivity, above_dz);
+        let coefficient = conductance / (material.volumetric_heat_capacity * dz);
+        diagonal_rate += coefficient;
+        neighbour_rate += coefficient * current[index + nr];
+    } else {
+        diagonal_rate += config.h_air_w_m2k / (material.volumetric_heat_capacity * dz);
+    }
+    let source_rate = if layer == nz - 1 { film_source[i] / material.volumetric_heat_capacity } else { 0.0 };
+    (diagonal_rate, neighbour_rate, source_rate)
+}
+
+fn linear_residual_norm(
+    config: &Config,
+    previous: &[f64],
+    current: &[f64],
+    film_source: &[f64],
+    dt: f64,
+    dr: f64,
+    substrate_dz: f64,
+) -> f64 {
+    let nr = config.radial_cells;
+    let nz = config.substrate_cells + 1;
+    let mut maximum_scaled_residual: f64 = 0.0;
+    for layer in 0..nz {
+        for i in 0..nr {
+            let index = layer * nr + i;
+            if i == nr - 1 {
+                maximum_scaled_residual = maximum_scaled_residual.max(current[index].abs());
+                continue;
+            }
+            let (diagonal_rate, neighbour_rate, source_rate) = cell_rates(
+                config, current, film_source, layer, i, dr, substrate_dz,
+            );
+            let left = (1.0 + dt * diagonal_rate) * current[index];
+            let right = previous[index] + dt * (source_rate + neighbour_rate);
+            let scale = left.abs().max(right.abs()).max(1.0);
+            maximum_scaled_residual = maximum_scaled_residual.max((left - right).abs() / scale);
+        }
+    }
+    maximum_scaled_residual
 }
 
 fn interface_conductance(k_a: f64, dz_a: f64, k_b: f64, dz_b: f64) -> f64 {
     1.0 / (0.5 * dz_a / k_a + 0.5 * dz_b / k_b)
 }
 
+fn radial_annulus_area(index: usize, radial_cells: usize, dr: f64) -> f64 {
+    if index == radial_cells - 1 {
+        0.0
+    } else if index == 0 {
+        std::f64::consts::PI * (0.5 * dr).powi(2)
+    } else {
+        2.0 * std::f64::consts::PI * index as f64 * dr * dr
+    }
+}
+
 fn interpolate_complex(a: Complex, b: Complex, fraction: f64) -> Complex {
     Complex::new(a.re + fraction * (b.re - a.re), a.im + fraction * (b.im - a.im))
 }
 
-fn thin_film_absorptance(config: &Config, film_index: Complex) -> f64 {
+fn thin_film_power(config: &Config, film_index: Complex) -> OpticalPower {
     let n0 = Complex::new(config.substrate_index, 0.0);
     let n2 = Complex::new(config.air_index, 0.0);
     let r01 = n0.sub(film_index).div(n0.add(film_index));
@@ -377,7 +522,23 @@ fn thin_film_absorptance(config: &Config, film_index: Complex) -> f64 {
     let transmission = t01.mul(t12).mul(phase).div(denominator);
     let reflected = reflection.norm_sqr();
     let transmitted = config.air_index / config.substrate_index * transmission.norm_sqr();
-    (1.0 - reflected - transmitted).clamp(0.0, 1.0)
+    OpticalPower {
+        reflectance: reflected,
+        transmittance: transmitted,
+        absorptance_raw: 1.0 - reflected - transmitted,
+    }
+}
+
+fn optical_power_is_valid(power: OpticalPower) -> bool {
+    power.reflectance.is_finite()
+        && power.transmittance.is_finite()
+        && power.absorptance_raw.is_finite()
+        && power.reflectance >= -OPTICAL_POWER_TOLERANCE
+        && power.transmittance >= -OPTICAL_POWER_TOLERANCE
+        && power.absorptance_raw >= -OPTICAL_POWER_TOLERANCE
+        && power.reflectance <= 1.0 + OPTICAL_POWER_TOLERANCE
+        && power.transmittance <= 1.0 + OPTICAL_POWER_TOLERANCE
+        && power.absorptance_raw <= 1.0 + OPTICAL_POWER_TOLERANCE
 }
 
 fn stored_energy(config: &Config, temperature_rise: &[f64], dr: f64, substrate_dz: f64) -> f64 {
@@ -388,10 +549,9 @@ fn stored_energy(config: &Config, temperature_rise: &[f64], dr: f64, substrate_d
         let material = if layer == nz - 1 { config.film } else { config.substrate };
         let dz = if layer == nz - 1 { config.film_thickness_m } else { substrate_dz };
         for i in 0..nr {
-            let radius = i as f64 * dr;
-            let area = if i == 0 { std::f64::consts::PI * (0.5 * dr).powi(2) } else { 2.0 * std::f64::consts::PI * radius * dr };
+            let area = radial_annulus_area(i, nr, dr);
             energy += material.volumetric_heat_capacity * temperature_rise[layer * nr + i] * area * dz;
         }
     }
-    energy.max(0.0)
+    energy
 }

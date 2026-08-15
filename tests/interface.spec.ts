@@ -67,12 +67,21 @@ test("run overview presents the experiment visually and updates with the configu
   expect(Math.abs((diagramBounds?.width ?? 0) - (overviewBounds?.width ?? 0))).toBeLessThanOrEqual(1);
 
   const cards = page.locator(".scientific-evidence-summary__checks > li");
-  await expect(cards).toHaveCount(4);
+  await expect(cards).toHaveCount(7);
+  await expect(cards).toContainText([
+    "Parameter ranges",
+    "Pulse resolution",
+    "Radial boundary",
+    "Gaussian source resolution",
+    "Substrate diffusion resolution",
+    "Film control volume",
+    "Browser mesh",
+  ]);
   const rows = await cards.evaluateAll((elements) => elements.map((element) => Math.round(element.getBoundingClientRect().top)));
-  expect(new Set(rows).size).toBe(1);
+  expect(new Set(rows).size).toBeLessThanOrEqual(2);
   await expect(page.getByText("All required values are finite and within solver limits.")).toHaveCount(0);
   const checksBounds = await page.locator(".scientific-evidence-summary").boundingBox();
-  expect(diagramBounds?.height ?? 0).toBeGreaterThan((checksBounds?.height ?? 0) * 2);
+  expect(checksBounds?.height ?? Number.POSITIVE_INFINITY).toBeLessThan(diagramBounds?.height ?? 0);
 });
 
 test("reference simulation produces plots, validation evidence and export", async ({ page }) => {
@@ -92,6 +101,8 @@ test("reference simulation produces plots, validation evidence and export", asyn
   await page.getByRole("button", { name: "Validation" }).click();
   await expect(page.getByRole("heading", { name: "Model and validation" })).toBeVisible();
   await expect(page.getByText("Core checks passed; convergence pending")).toBeVisible();
+  await expect(page.getByText("Linear convergence: Passed")).toBeVisible();
+  await expect(page.getByText("Optical passivity: Passed")).toBeVisible();
   await page.screenshot({ path: "tests/artifacts/desktop-validation.png", fullPage: true });
 });
 
