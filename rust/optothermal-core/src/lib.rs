@@ -3,6 +3,7 @@ use std::{mem, slice};
 const CONFIG_LENGTH: usize = 30;
 const HEADER_LENGTH: usize = 29;
 const MAX_CELLS: usize = 40_000;
+const MAX_OUTPUT_VALUES: usize = 100_000;
 const MAX_LINEAR_ITERATIONS: usize = 80;
 const LINEAR_UPDATE_TOLERANCE_K: f64 = 1.0e-7;
 const LINEAR_RESIDUAL_TOLERANCE: f64 = 1.0e-9;
@@ -86,39 +87,74 @@ struct Config {
 impl Config {
     fn parse(values: &[f64]) -> Result<Self, i32> {
         if values.len() != CONFIG_LENGTH || values.iter().any(|value| !value.is_finite()) { return Err(2); }
-        let time_steps = values[5].round() as usize;
-        let radial_cells = values[6].round() as usize;
-        let substrate_cells = values[7].round() as usize;
+        if [5usize, 6, 7].iter().any(|index| values[*index].fract() != 0.0) { return Err(3); }
+        let time_steps = values[5] as usize;
+        let radial_cells = values[6] as usize;
+        let substrate_cells = values[7] as usize;
         if !(24..=1200).contains(&time_steps)
             || !(17..=257).contains(&radial_cells)
             || !(4..=128).contains(&substrate_cells)
             || radial_cells.saturating_mul(substrate_cells + 1) > MAX_CELLS
         { return Err(3); }
         let positive = [0usize, 1, 2, 3, 4, 8, 9, 10, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 25, 26, 27];
-        if positive.iter().any(|index| values[*index] <= 0.0) { return Err(4); }
+        if positive.iter().any(|index| values[*index] <= 0.0) || values[28] < 0.0 { return Err(4); }
+        let wavelength_m = values[0] * 1.0e-6;
+        let waist_m = values[1] * 1.0e-6;
+        let peak_intensity_w_m2 = values[2] * 1.0e13;
+        let pulse_fwhm_s = values[3] * 1.0e-9;
+        let duration_s = values[4] * 1.0e-9;
+        let radius_m = values[8] * 1.0e-6;
+        let film_thickness_m = values[9] * 1.0e-9;
+        let substrate_depth_m = values[10] * 1.0e-6;
+        let ambient_k = values[11] + 273.15;
+        let transition_heating_k = values[18] + 273.15;
+        let transition_cooling_k = values[19] + 273.15;
+        let phase_relaxation_s = values[21] * 1.0e-9;
+        let film_volumetric_heat_capacity = values[22] * values[23];
+        let substrate_volumetric_heat_capacity = values[25] * values[26];
+        if !wavelength_m.is_finite()
+            || !waist_m.is_finite()
+            || !peak_intensity_w_m2.is_finite()
+            || !pulse_fwhm_s.is_finite()
+            || !duration_s.is_finite()
+            || !radius_m.is_finite()
+            || !film_thickness_m.is_finite()
+            || !substrate_depth_m.is_finite()
+            || !ambient_k.is_finite()
+            || ambient_k <= 0.0
+            || !transition_heating_k.is_finite()
+            || !transition_cooling_k.is_finite()
+            || transition_heating_k <= 0.0
+            || transition_cooling_k <= 0.0
+            || !phase_relaxation_s.is_finite()
+            || !film_volumetric_heat_capacity.is_finite()
+            || !substrate_volumetric_heat_capacity.is_finite()
+            || film_volumetric_heat_capacity <= 0.0
+            || substrate_volumetric_heat_capacity <= 0.0
+        { return Err(4); }
         Ok(Self {
-            wavelength_m: values[0] * 1.0e-6,
-            waist_m: values[1] * 1.0e-6,
-            peak_intensity_w_m2: values[2] * 1.0e13,
-            pulse_fwhm_s: values[3] * 1.0e-9,
-            duration_s: values[4] * 1.0e-9,
+            wavelength_m,
+            waist_m,
+            peak_intensity_w_m2,
+            pulse_fwhm_s,
+            duration_s,
             time_steps,
             radial_cells,
             substrate_cells,
-            radius_m: values[8] * 1.0e-6,
-            film_thickness_m: values[9] * 1.0e-9,
-            substrate_depth_m: values[10] * 1.0e-6,
-            ambient_k: values[11] + 273.15,
+            radius_m,
+            film_thickness_m,
+            substrate_depth_m,
+            ambient_k,
             substrate_index: values[12],
             air_index: values[13],
             insulating_index: Complex::new(values[14], values[15]),
             metallic_index: Complex::new(values[16], values[17]),
-            transition_heating_k: values[18] + 273.15,
-            transition_cooling_k: values[19] + 273.15,
+            transition_heating_k,
+            transition_cooling_k,
             transition_width_k: values[20],
-            phase_relaxation_s: values[21] * 1.0e-9,
-            film: Material { conductivity: values[24], volumetric_heat_capacity: values[22] * values[23] },
-            substrate: Material { conductivity: values[27], volumetric_heat_capacity: values[25] * values[26] },
+            phase_relaxation_s,
+            film: Material { conductivity: values[24], volumetric_heat_capacity: film_volumetric_heat_capacity },
+            substrate: Material { conductivity: values[27], volumetric_heat_capacity: substrate_volumetric_heat_capacity },
             h_air_w_m2k: values[28],
         })
     }
@@ -126,6 +162,7 @@ impl Config {
 
 #[no_mangle]
 pub extern "C" fn allocate_f64(length: usize) -> *mut f64 {
+    if length == 0 || length > MAX_OUTPUT_VALUES { return std::ptr::null_mut(); }
     let mut values = Vec::<f64>::with_capacity(length);
     let pointer = values.as_mut_ptr();
     mem::forget(values);
@@ -139,12 +176,22 @@ pub unsafe extern "C" fn deallocate_f64(pointer: *mut f64, capacity: usize) {
 
 #[no_mangle]
 pub extern "C" fn output_length(time_steps: usize, radial_cells: usize, substrate_cells: usize) -> usize {
-    let nz = substrate_cells.saturating_add(1);
-    HEADER_LENGTH
-        .saturating_add(4usize.saturating_mul(time_steps))
-        .saturating_add(3usize.saturating_mul(radial_cells))
-        .saturating_add(nz)
-        .saturating_add(2usize.saturating_mul(nz.saturating_mul(radial_cells)))
+    if !(24..=1200).contains(&time_steps)
+        || !(17..=257).contains(&radial_cells)
+        || !(4..=128).contains(&substrate_cells)
+        || radial_cells.saturating_mul(substrate_cells.saturating_add(1)) > MAX_CELLS
+    { return 0; }
+    let nz = substrate_cells + 1;
+    let Some(time_values) = 4usize.checked_mul(time_steps) else { return 0; };
+    let Some(radial_values) = 3usize.checked_mul(radial_cells) else { return 0; };
+    let Some(cell_count) = nz.checked_mul(radial_cells) else { return 0; };
+    let Some(map_values) = 2usize.checked_mul(cell_count) else { return 0; };
+    let Some(length) = HEADER_LENGTH.checked_add(time_values)
+        .and_then(|length| length.checked_add(radial_values))
+        .and_then(|length| length.checked_add(nz))
+        .and_then(|length| length.checked_add(map_values)) else { return 0; };
+    if length > MAX_OUTPUT_VALUES { return 0; }
+    length
 }
 
 #[no_mangle]
@@ -155,6 +202,7 @@ pub unsafe extern "C" fn run_simulation(
     output_capacity: usize,
 ) -> i32 {
     if config_pointer.is_null() || output_pointer.is_null() { return 1; }
+    if config_length != CONFIG_LENGTH { return 2; }
     let values = slice::from_raw_parts(config_pointer, config_length);
     let config = match Config::parse(values) { Ok(config) => config, Err(code) => return code };
     let required = output_length(config.time_steps, config.radial_cells, config.substrate_cells);

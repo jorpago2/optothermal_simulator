@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { dirname, resolve } from "node:path";
+import { delimiter, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -19,10 +19,11 @@ if (!cargo) {
 }
 
 const cargoDirectory = cargo === "cargo" ? undefined : dirname(cargo);
+const pathValue = process.env.PATH ?? "";
 const build = spawnSync(cargo, ["build", "--manifest-path", manifest, "--target", "wasm32-unknown-unknown", "--release"], {
   cwd: root,
   stdio: "inherit",
-  env: { ...process.env, PATH: cargoDirectory ? `${cargoDirectory};${process.env.PATH}` : process.env.PATH },
+  env: { ...process.env, PATH: cargoDirectory ? [cargoDirectory, pathValue].filter(Boolean).join(delimiter) : pathValue },
 });
 if (build.status !== 0) process.exit(build.status ?? 1);
 

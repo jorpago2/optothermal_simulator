@@ -132,9 +132,9 @@ test("reference simulation produces plots, validation evidence and export", asyn
 
   await page.getByRole("button", { name: "Validation" }).click();
   await expect(page.getByRole("heading", { name: "Model and validation" })).toBeVisible();
-  await expect(page.getByText("Core checks passed; convergence pending")).toBeVisible();
-  await expect(page.getByText("Linear convergence: Passed")).toBeVisible();
-  await expect(page.getByText("Optical passivity: Passed")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Core checks passed; convergence pending/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Linear convergence: Passed" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Optical passivity: Passed" })).toBeVisible();
   await page.screenshot({ path: "tests/artifacts/desktop-validation.png", fullPage: true });
 });
 
@@ -263,6 +263,8 @@ test("plot controls stay outside the scientific data region", async ({ page }) =
   const toolbarHost = firstFrame.locator(".scientific-plot-frame__toolbar");
   const toolbar = firstFrame.getByRole("toolbar", { name: "Plot controls" });
   const plot = firstFrame.locator(".scientific-plot-surface");
+  await expect(page.locator(".scientific-plot-surface[role=img]")).toHaveCount(0);
+  await expect(page.locator(".scientific-plot-surface[role=group]")).toHaveCount(4);
   await expect(toolbarHost).toBeVisible();
   await expect(toolbar).toBeVisible();
 
@@ -276,4 +278,155 @@ test("plot controls stay outside the scientific data region", async ({ page }) =
     expect(bounds?.height ?? 0).toBeGreaterThanOrEqual(44);
     expect(bounds?.width ?? 0).toBeGreaterThanOrEqual(44);
   }
+});
+
+test("narrow configuration keeps the scientific stage out of the panel flow", async ({ page }) => {
+  for (const width of [375, 768, 1024]) {
+    await page.setViewportSize({ width, height: 812 });
+    await page.goto("./");
+
+    await expect(page.locator(".scientific-workbench__panel")).toBeVisible();
+    await expect(page.locator(".scientific-workbench__stage")).toBeHidden();
+    await expect(page.locator(".scientific-app-shell")).not.toHaveAttribute("data-stage-preview");
+  }
+});
+
+test("mobile export confirms the downloaded file inside the viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("./");
+  await page.getByRole("button", { name: "Run simulation" }).click();
+  await expect(page.getByRole("heading", { name: "Optothermal pulse completed" })).toBeVisible();
+
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: /Export/ }).first().click();
+  await download;
+
+  const receipt = page.getByRole("status").filter({ hasText: "optothermal-vo2-result.json" }).last();
+  await expect(receipt).toBeVisible();
+  const [receiptBounds, viewport] = await Promise.all([
+    receipt.boundingBox(),
+    page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
+  ]);
+  expect(receiptBounds).not.toBeNull();
+  expect(receiptBounds?.x ?? -1).toBeGreaterThanOrEqual(0);
+  expect((receiptBounds?.x ?? 0) + (receiptBounds?.width ?? 0)).toBeLessThanOrEqual(viewport.width + 1);
+  expect(receiptBounds?.y ?? -1).toBeGreaterThanOrEqual(0);
+  expect((receiptBounds?.y ?? 0) + (receiptBounds?.height ?? 0)).toBeLessThanOrEqual(viewport.height + 1);
+});
+
+test("validation provenance wraps technical paths without clipping", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("./");
+  await page.getByRole("button", { name: "Validation", exact: true }).click();
+
+  const reference = page.getByText(/paper_zscan\/simulations\/configs\/materials\/vo2_1064_reference\.json/).last();
+  await expect(reference).toBeVisible();
+  const dimensions = await reference.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+    overflowWrap: getComputedStyle(element).overflowWrap,
+    wordBreak: getComputedStyle(element).wordBreak,
+  }));
+  expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth + 1);
+  expect(["anywhere", "break-word", "break-all"].includes(dimensions.overflowWrap) || dimensions.wordBreak === "break-all").toBeTruthy();
+  const checkHeading = page.locator(".scientific-evidence-summary__check-heading").first();
+  const headingLayout = await checkHeading.evaluate((element) => ({
+    direction: getComputedStyle(element).flexDirection,
+    childTops: Array.from(element.children, (child) => Math.round(child.getBoundingClientRect().top)),
+  }));
+  expect(headingLayout.direction).toBe("row");
+  expect(new Set(headingLayout.childTops).size).toBe(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+});
+
+test("plots fit the viewport after reopening Results at a narrower size", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("./");
+  await page.getByRole("button", { name: "Run simulation" }).click();
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(4);
+
+  await page.getByRole("button", { name: "Configure", exact: true }).click();
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.getByRole("button", { name: "Results", exact: true }).click();
+  await expect(page.locator(".plot-surface")).toHaveCount(4);
+  await page.waitForTimeout(200);
+
+  const dimensions = await page.locator(".plot-surface").evaluateAll((surfaces) => surfaces.map((surface) => {
+    const svg = surface.querySelector("svg.main-svg");
+    return {
+      clientWidth: surface.clientWidth,
+      scrollWidth: surface.scrollWidth,
+      svgWidth: svg?.getBoundingClientRect().width ?? 0,
+    };
+  }));
+  for (const dimension of dimensions) {
+    expect(dimension.clientWidth).toBeGreaterThan(0);
+    expect(dimension.scrollWidth).toBeLessThanOrEqual(dimension.clientWidth + 1);
+    expect(dimension.svgWidth).toBeLessThanOrEqual(dimension.clientWidth + 1);
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+});
+
+test("mobile result metrics form a readable two-by-two summary", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("./");
+  await page.getByRole("button", { name: "Run simulation" }).click();
+  await expect(page.getByRole("heading", { name: "Optothermal pulse completed" })).toBeVisible();
+
+  const metrics = page.locator(".scientific-outcome-summary .scientific-metric");
+  await expect(metrics).toHaveCount(4);
+  const boxes = await metrics.evaluateAll((elements) => elements.map((element) => {
+    const box = element.getBoundingClientRect();
+    return { left: Math.round(box.left), top: Math.round(box.top), width: box.width, height: box.height };
+  }));
+  expect(new Set(boxes.map((box) => box.top)).size).toBe(2);
+  expect(new Set(boxes.map((box) => box.left)).size).toBe(2);
+  expect(Math.min(...boxes.map((box) => box.width))).toBeGreaterThanOrEqual(120);
+  expect(Math.max(...boxes.map((box) => box.height))).toBeLessThanOrEqual(160);
+});
+
+test("scientific plot toolbar commands remain visible and actionable in dark theme", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("./");
+  await page.getByRole("button", { name: "Run simulation" }).click();
+  await expect(page.locator(".scientific-plot-frame__toolbar .modebar-btn").first()).toBeVisible();
+  await page.getByRole("button", { name: "Use dark theme" }).click();
+
+  const buttons = page.locator(".scientific-plot-frame__toolbar .modebar-btn");
+  const details = await buttons.evaluateAll((elements) => elements.map((element) => {
+    const style = getComputedStyle(element);
+    const icon = element.querySelector("svg path");
+    return {
+      opacity: Number.parseFloat(style.opacity),
+      color: style.color,
+      iconFill: icon ? getComputedStyle(icon).fill : null,
+      pointerEvents: style.pointerEvents,
+      disabled: (element as HTMLButtonElement).disabled,
+      ariaDisabled: element.getAttribute("aria-disabled"),
+      label: element.getAttribute("data-title") ?? element.getAttribute("title"),
+    };
+  }));
+  expect(details.length).toBeGreaterThan(0);
+  for (const detail of details) {
+    expect(detail.opacity).toBeGreaterThanOrEqual(0.8);
+    expect(detail.color).not.toBe("rgba(0, 0, 0, 0)");
+    expect(detail.iconFill).toBe(detail.color);
+    expect(detail.pointerEvents).not.toBe("none");
+    expect(detail.disabled).toBe(false);
+    expect(detail.ariaDisabled).not.toBe("true");
+    expect(detail.label).toBeTruthy();
+  }
+});
+
+test("desktop numerical checks do not leave a blank filler cell", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("./");
+
+  const grid = page.locator("#configure-view .scientific-evidence-summary[data-density=\"compact\"] .scientific-evidence-summary__checks");
+  const cells = grid.locator(":scope > li");
+  await expect(cells).toHaveCount(7);
+  const [gridBounds, lastCellBounds] = await Promise.all([grid.boundingBox(), cells.last().boundingBox()]);
+  expect(gridBounds).not.toBeNull();
+  expect(lastCellBounds).not.toBeNull();
+  expect(Math.abs((lastCellBounds?.x ?? 0) + (lastCellBounds?.width ?? 0) - ((gridBounds?.x ?? 0) + (gridBounds?.width ?? 0)))).toBeLessThanOrEqual(1);
 });

@@ -285,6 +285,16 @@ textarea {
   padding-block-start: var(--scientific-ui-spacing-05);
 }
 
+.optothermal-export-receipt {
+  margin-block-end: var(--scientific-ui-spacing-05);
+}
+
+/* Technical provenance is intentionally allowed to break anywhere on small screens. */
+.optothermal-stage .scientific-model-scope__reference {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .plot-loading {
   display: grid;
   min-height: 18rem;

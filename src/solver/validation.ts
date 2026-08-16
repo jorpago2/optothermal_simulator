@@ -20,6 +20,8 @@ const finitePositiveFields: Array<keyof OptothermalConfig> = [
   "substrateDensityKgM3", "substrateHeatCapacityJKgK", "substrateConductivityWMK",
 ];
 
+const finiteNonNegativeFields: Array<keyof OptothermalConfig> = ["convectionWM2K"];
+
 export function getMeshDiagnostics(config: OptothermalConfig): MeshDiagnostics {
   const radialSpacingUm = config.radiusUm / Math.max(1, config.radialCells - 1);
   const pointsPerWaist = config.waistUm / radialSpacingUm;
@@ -46,13 +48,23 @@ export function validateConfig(config: OptothermalConfig): ValidationIssue[] {
     const value = config[field];
     if (!Number.isFinite(value) || value <= 0) issues.push({ id: `positive-${field}`, severity: "error", field, message: "Enter a positive finite value." });
   }
+  for (const field of finiteNonNegativeFields) {
+    const value = config[field];
+    if (!Number.isFinite(value) || value < 0) issues.push({ id: `non-negative-${field}`, severity: "error", field, message: "Enter a finite value greater than or equal to zero." });
+  }
   if (!Number.isFinite(config.ambientC) || config.ambientC < -100 || config.ambientC > 500) {
     issues.push({ id: "ambient-range", severity: "error", field: "ambientC", message: "Ambient temperature must be between −100 and 500 °C." });
+  }
+  if (!Number.isFinite(config.transitionHeatingC) || config.transitionHeatingC <= -273.15) {
+    issues.push({ id: "heating-transition-absolute-zero", severity: "error", field: "transitionHeatingC", message: "The heating transition must be above absolute zero (−273.15 °C)." });
+  }
+  if (!Number.isFinite(config.transitionCoolingC) || config.transitionCoolingC <= -273.15) {
+    issues.push({ id: "cooling-transition-absolute-zero", severity: "error", field: "transitionCoolingC", message: "The cooling transition must be above absolute zero (−273.15 °C)." });
   }
   if (config.durationNs < 6 * config.pulseFwhmNs) {
     issues.push({ id: "duration-window", severity: "error", field: "durationNs", message: "Use at least six pulse FWHM so the Gaussian pulse is contained in the time window." });
   }
-  const pointsPerFwhm = config.timeSteps * config.pulseFwhmNs / config.durationNs;
+  const pointsPerFwhm = (config.timeSteps - 1) * config.pulseFwhmNs / config.durationNs;
   if (pointsPerFwhm < 16) {
     issues.push({ id: "temporal-resolution", severity: "warning", field: "timeSteps", message: `Only ${pointsPerFwhm.toFixed(1)} points resolve the pulse FWHM; use at least 16.` });
   }
@@ -103,6 +115,7 @@ export function validateResult(result: OptothermalResult): ResultValidation {
   const nt = result.timeNs.length;
   const nr = result.radiusUm.length;
   const nz = result.depthUm.length;
+  const strictlyIncreasing = (values: number[]) => values.every((value, index) => index === 0 || value > values[index - 1]);
   const schema = nt >= 2 && nr >= 2 && nz >= 2
     && result.centerTemperatureC.length === nt
     && result.centerMetallicFraction.length === nt
@@ -112,7 +125,10 @@ export function validateResult(result: OptothermalResult): ResultValidation {
     && result.finalTemperatureMapC.length === nz
     && result.peakTemperatureMapC.length === nz
     && result.finalTemperatureMapC.every((row) => row.length === nr)
-    && result.peakTemperatureMapC.every((row) => row.length === nr);
+    && result.peakTemperatureMapC.every((row) => row.length === nr)
+    && strictlyIncreasing(result.timeNs)
+    && strictlyIncreasing(result.radiusUm)
+    && strictlyIncreasing(result.depthUm);
   const arrays = [
     result.timeNs,
     result.centerTemperatureC,
@@ -136,7 +152,10 @@ export function validateResult(result: OptothermalResult): ResultValidation {
   ];
   const physicalRanges = temperatureValues.every((value) => value >= -273.15)
     && result.centerMetallicFraction.every((value) => value >= 0 && value <= 1)
-    && result.centerAbsorptance.every((value) => value >= 0 && value <= 1);
+    && result.centerAbsorptance.every((value) => value >= 0 && value <= 1)
+    && result.metrics.maximumMetallicFraction >= 0 && result.metrics.maximumMetallicFraction <= 1
+    && result.metrics.peakAbsorptance >= 0 && result.metrics.peakAbsorptance <= 1
+    && result.metrics.baselineAbsorptance >= 0 && result.metrics.baselineAbsorptance <= 1;
   const opticalBalanceDefect = result.metrics.baselineReflectance
     + result.metrics.baselineTransmittance
     + result.metrics.baselineAbsorptanceRaw - 1;
@@ -145,11 +164,16 @@ export function validateResult(result: OptothermalResult): ResultValidation {
     && result.metrics.baselineTransmittance >= -OPTICAL_POWER_TOLERANCE
     && result.metrics.minimumAbsorptanceRaw >= -OPTICAL_POWER_TOLERANCE
     && result.metrics.maximumAbsorptanceRaw <= 1 + OPTICAL_POWER_TOLERANCE;
-  const energyBound = result.metrics.minimumStoredEnergyJ >= -NEGATIVE_ENERGY_TOLERANCE_J
+  const energyBound = result.metrics.absorbedEnergyJ >= 0
+    && result.metrics.maximumStoredEnergyJ >= result.metrics.minimumStoredEnergyJ
+    && result.metrics.minimumStoredEnergyJ >= -NEGATIVE_ENERGY_TOLERANCE_J
     && result.metrics.storedToAbsorbedRatio >= 0
     && result.metrics.storedToAbsorbedRatio <= 1.02;
   const converged = result.metrics.linearConverged
+    && result.metrics.averageLinearIterations > 0
     && result.metrics.maximumLinearIterations > 0
+    && result.metrics.worstLinearStep >= 1
+    && result.metrics.worstLinearStep < nt
     && result.metrics.worstLinearUpdateK <= result.metrics.linearUpdateToleranceK
     && result.metrics.worstLinearResidual <= result.metrics.linearResidualTolerance;
   return { schema, finite, physicalRanges, passive, energyBound, converged };

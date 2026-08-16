@@ -1,7 +1,7 @@
 import wasmUrl from "../wasm/optothermal_core.wasm?url";
 import type { OptothermalConfig, OptothermalResult } from "./types";
 import { serializeConfig } from "./protocol";
-import { assertValidResult } from "./validation";
+import { assertValidResult, validateConfig } from "./validation";
 
 const RESULT_SCHEMA_VERSION = 2;
 const RESULT_HEADER_LENGTH = 29;
@@ -23,7 +23,18 @@ async function loadCore(): Promise<CoreExports> {
         if (!response.ok) throw new Error(`Unable to load the WASM solver (${response.status}).`);
         const bytes = await response.arrayBuffer();
         const instance = await WebAssembly.instantiate(bytes, {});
-        return instance.instance.exports as CoreExports;
+        const core = instance.instance.exports as Partial<CoreExports>;
+        if (!core.memory || typeof core.allocate_f64 !== "function"
+          || typeof core.deallocate_f64 !== "function"
+          || typeof core.output_length !== "function"
+          || typeof core.run_simulation !== "function") {
+          throw new Error("The WASM solver is missing a required export.");
+        }
+        return core as CoreExports;
+      })
+      .catch((error) => {
+        exportsPromise = undefined;
+        throw error;
       });
   }
   return exportsPromise;
@@ -59,12 +70,27 @@ function solverError(status: number, diagnostics: Float64Array): Error {
 }
 
 export async function runWasmSimulation(config: OptothermalConfig): Promise<OptothermalResult> {
+  const blockingIssues = validateConfig(config).filter((issue) => issue.severity === "error");
+  if (blockingIssues.length > 0) {
+    throw new Error(`The solver configuration is invalid: ${blockingIssues.map((issue) => issue.message).join(" ")}`);
+  }
   const core = await loadCore();
   const serialized = serializeConfig(config);
   const outputLength = core.output_length(config.timeSteps, config.radialCells, config.substrateCells);
-  const configPointer = core.allocate_f64(serialized.length);
-  const outputPointer = core.allocate_f64(outputLength);
+  if (!Number.isSafeInteger(outputLength) || outputLength < RESULT_HEADER_LENGTH) {
+    throw new Error("The WASM solver rejected the requested output dimensions.");
+  }
+  let configPointer = 0;
+  let outputPointer = 0;
   try {
+    configPointer = core.allocate_f64(serialized.length);
+    if (!Number.isSafeInteger(configPointer) || configPointer <= 0) {
+      throw new Error("The WASM solver could not allocate its configuration buffer.");
+    }
+    outputPointer = core.allocate_f64(outputLength);
+    if (!Number.isSafeInteger(outputPointer) || outputPointer <= 0) {
+      throw new Error("The WASM solver could not allocate its output buffer.");
+    }
     new Float64Array(core.memory.buffer, configPointer, serialized.length).set(serialized);
     const status = core.run_simulation(configPointer, serialized.length, outputPointer, outputLength);
     if (status !== 0) {
@@ -131,7 +157,7 @@ export async function runWasmSimulation(config: OptothermalConfig): Promise<Opto
     assertValidResult(config, result);
     return result;
   } finally {
-    core.deallocate_f64(configPointer, serialized.length);
-    core.deallocate_f64(outputPointer, outputLength);
+    if (configPointer > 0) core.deallocate_f64(configPointer, serialized.length);
+    if (outputPointer > 0) core.deallocate_f64(outputPointer, outputLength);
   }
 }

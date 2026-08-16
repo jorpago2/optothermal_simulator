@@ -72,7 +72,8 @@ function downloadJson(config: OptothermalConfig, result: OptothermalResult) {
   link.href = url;
   link.download = "optothermal-vo2-result.json";
   link.click();
-  URL.revokeObjectURL(url);
+  // Let the browser finish consuming the download URL before releasing it.
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 export function App() {
@@ -89,6 +90,7 @@ export function App() {
   const outcomeRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const configureTriggerRef = useRef<HTMLButtonElement>(null);
+  const runRequestRef = useRef(0);
   const {
     hasInvalidFields,
     isValid: draftsAreValid,
@@ -118,6 +120,7 @@ export function App() {
       setActiveView("configure");
       return;
     }
+    const requestId = ++runRequestRef.current;
     setBusy(true);
     setError("");
     setExported(false);
@@ -125,15 +128,17 @@ export function App() {
     const started = performance.now();
     try {
       const [next] = await Promise.all([runSimulation(config), loadPlots()]);
+      if (runRequestRef.current !== requestId) return;
       setResult(next);
       setLastRunConfig({ ...config });
       setRuntimeMs(performance.now() - started);
     } catch (cause) {
+      if (runRequestRef.current !== requestId) return;
       setError(cause instanceof DOMException && cause.name === "AbortError"
         ? "Simulation cancelled."
         : cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setBusy(false);
+      if (runRequestRef.current === requestId) setBusy(false);
     }
   }, [config, draftsAreValid]);
 
@@ -146,6 +151,7 @@ export function App() {
   }, [activeView, configurationOpen]);
 
   useEffect(() => () => {
+    runRequestRef.current += 1;
     cancelActiveSimulation();
   }, []);
 
@@ -168,6 +174,7 @@ export function App() {
   };
 
   const stop = () => {
+    runRequestRef.current += 1;
     cancelActiveSimulation();
     setBusy(false);
     setError("Simulation cancelled.");
@@ -193,7 +200,7 @@ export function App() {
   ] : [], [busy, lastRunConfig, result, run, runBlocked]);
 
   const preflightChecks = useMemo<ScientificCheckDescriptor[]>(() => {
-    const pointsPerFwhm = config.timeSteps * config.pulseFwhmNs / config.durationNs;
+    const pointsPerFwhm = (config.timeSteps - 1) * config.pulseFwhmNs / config.durationNs;
     const meshCells = config.radialCells * (config.substrateCells + 1);
     const mesh = getMeshDiagnostics(config);
     return [
@@ -237,7 +244,6 @@ export function App() {
     <ScientificAppShell
       className="optothermal-app"
       panelOpen={panelOpen}
-      previewStageWhenPanelOpen
       header={(
         <ScientificHeader
           product="Optothermal Simulator"
@@ -309,6 +315,15 @@ export function App() {
                 description="One Gaussian-beam position at z = 0; no axial sweep or detector propagation."
                 actions={<ScientificResultsToolbar actions={resultActions} />}
               >
+                {exported && (
+                  <ExportReceipt
+                    className="optothermal-export-receipt"
+                    fileName="optothermal-vo2-result.json"
+                    format="JSON"
+                    destination="Browser downloads"
+                    onDismiss={() => setExported(false)}
+                  />
+                )}
                 <section ref={outcomeRef} tabIndex={-1}>
                   <ScientificOutcomeSummary
                     title="Optothermal pulse completed"
@@ -323,7 +338,6 @@ export function App() {
                     ]}
                   />
                 </section>
-                {exported && <ExportReceipt fileName="optothermal-vo2-result.json" format="JSON" destination="Browser downloads" onDismiss={() => setExported(false)} />}
                 <Suspense fallback={<p className="plot-loading" role="status">Loading scientific plots…</p>}>
                   <Grid fullWidth narrow className="plot-grid">
                     <Column sm={4} md={8} lg={8} className="plot-column">

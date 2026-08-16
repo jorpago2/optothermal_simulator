@@ -1,5 +1,5 @@
 import type { OptothermalConfig, OptothermalResult } from "./types";
-import type { WorkerRequest, WorkerResponse } from "./protocol";
+import { isWorkerResponse, type WorkerRequest } from "./protocol";
 
 interface ActiveRun {
   requestId: string;
@@ -30,9 +30,15 @@ export function cancelActiveSimulation(): boolean {
 
 export function runSimulation(config: OptothermalConfig): Promise<OptothermalResult> {
   cancelActiveSimulation();
-  const worker = new Worker(new URL("./solver.worker.ts", import.meta.url), { type: "module" });
   const requestId = nextRequestId();
   return new Promise((resolve, reject) => {
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL("./solver.worker.ts", import.meta.url), { type: "module" });
+    } catch (error) {
+      reject(error);
+      return;
+    }
     const finish = (callback: () => void) => {
       if (activeRun?.requestId !== requestId) return;
       activeRun = undefined;
@@ -40,11 +46,17 @@ export function runSimulation(config: OptothermalConfig): Promise<OptothermalRes
       callback();
     };
     activeRun = { requestId, worker, reject };
-    worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
-      if (event.data.requestId !== requestId) return;
+    worker.onmessage = (event: MessageEvent<unknown>) => {
+      if (activeRun?.requestId !== requestId) return;
+      if (!isWorkerResponse(event.data)) {
+        finish(() => reject(new Error("The simulation worker returned an invalid response.")));
+        return;
+      }
+      const response = event.data;
+      if (response.requestId !== requestId) return;
       finish(() => {
-        if (event.data.ok) resolve(event.data.result);
-        else reject(new Error(event.data.error));
+        if (response.ok) resolve(response.result);
+        else reject(new Error(response.error));
       });
     };
     worker.onerror = (event) => {
