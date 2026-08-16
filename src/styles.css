@@ -1,10 +1,6 @@
 /* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4 */
 /* Hallmark · genre: modern-minimal · macrostructure: Workbench · design-system: design.md · designed-as-app · contrast: pass (40–41) · nav: scientific workbench · footer: none · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
 
-:root {
-  color-scheme: light;
-}
-
 html {
   scroll-padding-top: 3rem;
   overflow-x: clip;
@@ -47,6 +43,10 @@ textarea {
   min-width: 0;
   min-height: calc(100vh - 6rem);
   background: var(--cds-background);
+}
+
+.optothermal-stage > section[hidden] {
+  display: none;
 }
 
 .configuration-overview-grid {
@@ -243,7 +243,7 @@ textarea {
 }
 
 .experiment-diagram__annotation--intensity {
-  inset-block-start: 5rem;
+  inset-block-start: 4.5rem;
   inset-inline-end: var(--scientific-ui-spacing-05);
 }
 

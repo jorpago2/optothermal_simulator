@@ -50,7 +50,7 @@ const RadialTemperaturePlot = lazy(() => loadPlots().then((module) => ({ default
 const TemperatureMapPlot = lazy(() => loadPlots().then((module) => ({ default: module.TemperatureMapPlot })));
 
 const workflow: WorkflowItem[] = [
-  { id: "configure", label: "Configure", controlsId: "configuration-panel", icon: <SettingsAdjust size={20} /> },
+  { id: "configure", label: "Configure", controlsId: "configure-view", icon: <SettingsAdjust size={20} /> },
   { id: "results", label: "Results", controlsId: "results-view", icon: <ChartLine size={20} /> },
   { id: "validation", label: "Validation", controlsId: "validation-view", icon: <CheckmarkOutline size={20} /> },
 ];
@@ -88,6 +88,7 @@ export function App() {
   const [exported, setExported] = useState(false);
   const outcomeRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const configureTriggerRef = useRef<HTMLButtonElement>(null);
   const {
     hasInvalidFields,
     isValid: draftsAreValid,
@@ -137,8 +138,16 @@ export function App() {
   }, [config, draftsAreValid]);
 
   useEffect(() => {
-    stageRef.current?.closest(".scientific-workbench__stage")?.scrollTo({ top: 0, behavior: "auto" });
+    stageRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
   }, [activeView]);
+
+  useEffect(() => {
+    if (activeView === "configure" && !configurationOpen) configureTriggerRef.current?.focus();
+  }, [activeView, configurationOpen]);
+
+  useEffect(() => () => {
+    cancelActiveSimulation();
+  }, []);
 
   useScientificResultTransition({
     state: status.state,
@@ -251,6 +260,9 @@ export function App() {
           activeId={activeView}
           expandedId={panelOpen ? "configure" : null}
           collapsible
+          registerItemRef={(id, node) => {
+            if (id === "configure") configureTriggerRef.current = node;
+          }}
           onChange={(id) => {
             if (id === null && activeView === "configure") {
               setConfigurationOpen(false);
@@ -262,7 +274,7 @@ export function App() {
           }}
         />
       )}
-      panel={(
+      panel={panelOpen ? (
         <div id="configuration-panel">
           <ConfigurationPanel
             config={config}
@@ -277,13 +289,12 @@ export function App() {
             hasInvalidDrafts={hasInvalidFields}
           />
         </div>
-      )}
+      ) : undefined}
       statusBar={<ScientificStatusBar status={status} metadata={[`${config.radialCells} × ${config.substrateCells + 1} r–z cells · ${config.timeSteps} time samples · ${result ? result.engine : "Rust/WASM"}`]} />}
     >
       <div ref={stageRef} className="optothermal-stage">
         <h1 className="optothermal-visually-hidden">Optothermal Simulator</h1>
-        {activeView === "results" && (
-          <section id="results-view" aria-label="Simulation results">
+        <section id="results-view" aria-label="Simulation results" hidden={activeView !== "results"}>
             {error && <InlineNotification kind="error" title="Simulation failed" subtitle={error} lowContrast hideCloseButton />}
             {!result ? (
               <ScientificEmptyState
@@ -330,10 +341,8 @@ export function App() {
                 </Suspense>
               </ScientificResultsLayout>
             )}
-          </section>
-        )}
-        {activeView === "validation" && (
-          <section id="validation-view" aria-labelledby="validation-title">
+        </section>
+        <section id="validation-view" aria-labelledby="validation-title" hidden={activeView !== "validation"}>
             <ScientificStageHeader
               title="Model and validation"
               titleId="validation-title"
@@ -380,10 +389,8 @@ export function App() {
                 </Column>
               )}
             </Grid>
-          </section>
-        )}
-        {activeView === "configure" && (
-          <section className="configuration-overview" aria-labelledby="configuration-overview-title">
+        </section>
+        <section id="configure-view" className="configuration-overview" aria-labelledby="configuration-overview-title" hidden={activeView !== "configure"}>
             <ScientificStageHeader
               title="Run overview"
               titleId="configuration-overview-title"
@@ -405,8 +412,7 @@ export function App() {
                 />
               </Column>
             </Grid>
-          </section>
-        )}
+        </section>
       </div>
     </ScientificAppShell>
   );

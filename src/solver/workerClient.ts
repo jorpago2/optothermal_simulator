@@ -1,16 +1,5 @@
 import type { OptothermalConfig, OptothermalResult } from "./types";
-
-interface WorkerRequest {
-  requestId: string;
-  config: OptothermalConfig;
-}
-
-interface WorkerResponse {
-  requestId: string;
-  ok: boolean;
-  result?: OptothermalResult;
-  error?: string;
-}
+import type { WorkerRequest, WorkerResponse } from "./protocol";
 
 interface ActiveRun {
   requestId: string;
@@ -54,8 +43,8 @@ export function runSimulation(config: OptothermalConfig): Promise<OptothermalRes
     worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
       if (event.data.requestId !== requestId) return;
       finish(() => {
-        if (event.data.ok && event.data.result) resolve(event.data.result);
-        else reject(new Error(event.data.error ?? "The simulation worker failed."));
+        if (event.data.ok) resolve(event.data.result);
+        else reject(new Error(event.data.error));
       });
     };
     worker.onerror = (event) => {

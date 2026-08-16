@@ -59,7 +59,7 @@ test("run overview presents the experiment visually and updates with the configu
   await expect(page.getByRole("heading", { name: "Optical stack and beam" })).toBeVisible();
   await expect(page.getByText("Substrate-side incidence · axisymmetric r–z · not to scale")).toBeVisible();
   await expect(page.getByText("Radial domain", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("Model scope", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Model scope", { exact: true })).toBeHidden();
 
   const waist = page.getByLabel("Beam waist w₀ in µm");
   await waist.fill("15");
@@ -72,7 +72,7 @@ test("run overview presents the experiment visually and updates with the configu
   ]);
   expect(Math.abs((diagramBounds?.width ?? 0) - (overviewBounds?.width ?? 0))).toBeLessThanOrEqual(1);
 
-  const cards = page.locator(".scientific-evidence-summary__checks > li");
+  const cards = page.locator("#configure-view .scientific-evidence-summary__checks > li");
   await expect(cards).toHaveCount(7);
   await expect(cards).toContainText([
     "Parameter ranges",
@@ -85,11 +85,34 @@ test("run overview presents the experiment visually and updates with the configu
   ]);
   const rows = await cards.evaluateAll((elements) => elements.map((element) => Math.round(element.getBoundingClientRect().top)));
   expect(new Set(rows).size).toBeLessThanOrEqual(2);
-  await expect(page.getByText("All required values are finite and within solver limits.")).toHaveCount(0);
-  const checksBounds = await page.locator(".scientific-evidence-summary").boundingBox();
+  await expect(page.locator("#configure-view").getByText("All required values are finite and within solver limits.")).toHaveCount(0);
+  const checksBounds = await page.locator("#configure-view .scientific-evidence-summary").boundingBox();
   expect(checksBounds?.height ?? Number.POSITIVE_INFINITY).toBeLessThan(diagramBounds?.height ?? 0);
   await expect(page.locator(".experiment-overview")).toHaveScreenshot("reference-overview.png", { animations: "disabled", maxDiffPixelRatio: 0.01 });
   await expectAccessible(page);
+});
+
+test("configuration closure restores focus to the React navigation trigger", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("./");
+
+  const configure = page.getByRole("button", { name: "Configure", exact: true });
+  const close = page.getByRole("button", { name: "Close configuration" });
+  const controlledRegions = await page.locator(".scientific-tool-rail__item").evaluateAll((items) => items.map((item) => item.getAttribute("aria-controls")));
+  for (const id of controlledRegions) {
+    expect(id).not.toBeNull();
+    await expect(page.locator(`#${id}`)).toHaveCount(1);
+  }
+
+  await close.click();
+  await expect(page.locator(".scientific-workbench__panel")).toBeHidden();
+  await expect(configure).toBeFocused();
+
+  await configure.click();
+  await page.getByLabel("Wavelength in µm").focus();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".scientific-workbench__panel")).toBeHidden();
+  await expect(configure).toBeFocused();
 });
 
 test("reference simulation produces plots, validation evidence and export", async ({ page }) => {
@@ -113,6 +136,61 @@ test("reference simulation produces plots, validation evidence and export", asyn
   await expect(page.getByText("Linear convergence: Passed")).toBeVisible();
   await expect(page.getByText("Optical passivity: Passed")).toBeVisible();
   await page.screenshot({ path: "tests/artifacts/desktop-validation.png", fullPage: true });
+});
+
+test("React owns result freshness, export feedback and stable plot mounting", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await page.goto("./");
+  await page.getByRole("button", { name: "Run simulation" }).click();
+  await expect(page.getByRole("heading", { name: "Optothermal pulse completed" })).toBeVisible();
+
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export result" }).click();
+  await download;
+  await expect(page.getByText("optothermal-vo2-result.json")).toBeVisible();
+  await expect(page.getByText("Browser downloads")).toBeVisible();
+
+  await page.getByRole("button", { name: "Configure", exact: true }).click();
+  const waist = page.getByLabel("Beam waist w₀ in µm");
+  await waist.fill("13");
+  await waist.press("Enter");
+  await expect(page.getByText("Inputs modified", { exact: true }).first()).toBeVisible();
+
+  await page.getByRole("button", { name: "Results", exact: true }).click();
+  await expect(page.getByText("Result is stale", { exact: true })).toBeVisible();
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(4);
+
+  await page.getByRole("button", { name: "Validation", exact: true }).click();
+  await page.getByRole("button", { name: "Results", exact: true }).click();
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(4);
+
+  await page.getByRole("button", { name: "Use dark theme" }).click();
+  await expect(page.getByRole("button", { name: "Use light theme" })).toBeVisible();
+  await expectAccessible(page);
+});
+
+test("a worker failure is represented by React without leaving a stale running state", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "Worker", {
+      configurable: true,
+      value: class FailingWorker {
+        onmessage: ((event: MessageEvent) => void) | null = null;
+        onerror: ((event: { message: string }) => void) | null = null;
+        postMessage() {
+          queueMicrotask(() => this.onerror?.({ message: "Injected worker failure" }));
+        }
+        terminate() {}
+      },
+    });
+  });
+  await page.setViewportSize({ width: 768, height: 900 });
+  await page.goto("./");
+  await page.getByRole("button", { name: "Run simulation" }).click();
+
+  await expect(page.getByText("Injected worker failure").first()).toBeVisible();
+  await expect(page.getByText("Simulation failed", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No result yet" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run", exact: true })).toBeEnabled();
 });
 
 test("all result panels remain reachable on a narrow mobile stage", async ({ page }) => {

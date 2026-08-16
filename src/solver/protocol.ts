@@ -1,4 +1,13 @@
-import type { OptothermalConfig } from "./types";
+import type { OptothermalConfig, OptothermalResult } from "./types";
+
+export interface WorkerRequest {
+  requestId: string;
+  config: OptothermalConfig;
+}
+
+export type WorkerResponse =
+  | { requestId: string; ok: true; result: OptothermalResult }
+  | { requestId: string; ok: false; error: string };
 
 /** Ordered ABI payload shared by TypeScript and the Rust/WASM core. */
 export function serializeConfig(config: OptothermalConfig): Float64Array {
