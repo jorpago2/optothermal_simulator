@@ -1,4 +1,4 @@
-import { Button, Column, Grid, InlineNotification } from "@carbon/react";
+import { Button, Column, Grid, InlineNotification, SkipToContent } from "@carbon/react";
 import {
   ChartLine,
   CheckmarkOutline,
@@ -246,6 +246,7 @@ export function App() {
       panelOpen={panelOpen}
       header={(
         <ScientificHeader
+          skipLink={<SkipToContent href="#optothermal-workspace">Skip to simulation workspace</SkipToContent>}
           product="Optothermal Simulator"
           compactProduct="Optothermal"
           descriptor="Axisymmetric VO₂"
@@ -288,7 +289,6 @@ export function App() {
             busy={busy}
             onChange={updateConfig}
             onReset={resetPreset}
-            onRun={() => { void run(); }}
             onClose={() => setConfigurationOpen(false)}
             onFieldValidationChange={reportFieldValidity}
             fieldRevision={fieldRevision}
@@ -298,7 +298,7 @@ export function App() {
       ) : undefined}
       statusBar={<ScientificStatusBar status={status} metadata={[`${config.radialCells} × ${config.substrateCells + 1} r–z cells · ${config.timeSteps} time samples · ${result ? result.engine : "Rust/WASM"}`]} />}
     >
-      <div ref={stageRef} className="optothermal-stage">
+      <div ref={stageRef} id="optothermal-workspace" className="optothermal-stage" tabIndex={-1}>
         <h1 className="optothermal-visually-hidden">Optothermal Simulator</h1>
         <section id="results-view" aria-label="Simulation results" hidden={activeView !== "results"}>
             {error && <InlineNotification kind="error" title="Simulation failed" subtitle={error} lowContrast hideCloseButton />}

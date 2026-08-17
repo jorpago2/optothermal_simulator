@@ -340,6 +340,34 @@ textarea {
   font-family: var(--scientific-ui-font-sans, "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif);
 }
 
+.plot-data-summary {
+  padding-block: var(--scientific-ui-spacing-03);
+  color: var(--cds-text-secondary);
+}
+
+.plot-data-summary summary {
+  cursor: pointer;
+  color: var(--cds-link-primary);
+  font-weight: 600;
+}
+
+.plot-data-summary dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: var(--scientific-ui-spacing-03);
+  margin: var(--scientific-ui-spacing-03) 0 0;
+}
+
+.plot-data-summary dt {
+  font-size: 0.75rem;
+}
+
+.plot-data-summary dd {
+  margin: var(--scientific-ui-spacing-01) 0 0;
+  color: var(--cds-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
 @media (max-width: 671px) {
   .validation-grid,
   .configuration-overview-grid {

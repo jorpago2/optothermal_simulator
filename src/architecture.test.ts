@@ -20,6 +20,13 @@ const sources = files.map((path) => ({
 }));
 
 describe("React interface ownership", () => {
+  it("links keyboard users to the focusable simulation workspace", () => {
+    const appSource = readFileSync(join(sourceRoot, "App.tsx"), "utf8");
+
+    expect(appSource).toMatch(/skipLink=\{<SkipToContent href="#optothermal-workspace"/);
+    expect(appSource).toMatch(/id="optothermal-workspace"[^>]+tabIndex=\{-1\}/);
+  });
+
   it("keeps one React root and no interactive legacy HTML", () => {
     const indexHtml = readFileSync(join(projectRoot, "index.html"), "utf8");
     const roots = sources.flatMap(({ path, text }) => [...text.matchAll(/\bcreateRoot\s*\(/g)].map(() => path));

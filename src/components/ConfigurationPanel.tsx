@@ -16,7 +16,6 @@ interface ConfigurationPanelProps {
   busy: boolean;
   onChange: (field: keyof OptothermalConfig, value: number) => void;
   onReset: () => void;
-  onRun: () => void;
   onClose: () => void;
   onFieldValidationChange: ScientificFieldValidationReporter;
   fieldRevision: number;
@@ -106,7 +105,7 @@ function Fields({ definitions, config, issues, onChange, onFieldValidationChange
   ));
 }
 
-export function ConfigurationPanel({ config, issues, busy, onChange, onReset, onRun, onClose, onFieldValidationChange, fieldRevision, hasInvalidDrafts }: ConfigurationPanelProps) {
+export function ConfigurationPanel({ config, issues, busy, onChange, onReset, onClose, onFieldValidationChange, fieldRevision, hasInvalidDrafts }: ConfigurationPanelProps) {
   const errors = issues.filter((issue) => issue.severity === "error");
   const messages: ValidationMessage[] = issues.map((issue) => ({
     id: issue.id,
@@ -127,7 +126,6 @@ export function ConfigurationPanel({ config, issues, busy, onChange, onReset, on
       footer={(
         <ScientificPanelFooter summary={hasInvalidDrafts ? "Review the invalid field before running" : errors.length ? `${errors.length} blocking issue${errors.length === 1 ? "" : "s"}` : "Ready for a fixed-position run"}>
           <Button type="button" kind="secondary" disabled={busy} onClick={onReset}>Reset preset</Button>
-          <Button type="button" kind="primary" disabled={busy || errors.length > 0 || hasInvalidDrafts} onClick={onRun}>{busy ? "Running…" : "Run simulation"}</Button>
         </ScientificPanelFooter>
       )}
     >

@@ -29,7 +29,7 @@ test("configuration shell remains usable across Carbon breakpoints", async ({ pa
     if (viewport.width >= 1056) {
       await expect(page.getByRole("img", { name: /Optical stack and beam/ })).toBeVisible();
     }
-    await expect(page.getByRole("button", { name: "Run simulation" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Run", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Optical and phase model" })).toHaveAttribute("aria-expanded", "false");
     if (viewport.width === 320) {
       const panel = page.locator(".scientific-workbench__panel");
@@ -115,12 +115,29 @@ test("configuration closure restores focus to the React navigation trigger", asy
   await expect(configure).toBeFocused();
 });
 
+test("skip link moves keyboard focus to the simulation workspace", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("./");
+
+  const skipLink = page.getByRole("link", { name: "Skip to simulation workspace" });
+  await expect(skipLink).toHaveJSProperty("tabIndex", 0);
+  await skipLink.focus();
+  await expect(skipLink).toBeFocused();
+  await expect(skipLink).toBeVisible();
+
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#optothermal-workspace")).toBeFocused();
+});
+
 test("reference simulation produces plots, validation evidence and export", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("./");
-  await page.getByRole("button", { name: "Run simulation" }).click();
+  await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Optothermal pulse completed" })).toBeVisible();
   await expect(page.locator(".plot-surface")).toHaveCount(4);
+  await expect(page.locator(".plot-data-summary")).toHaveCount(4);
+  await page.locator(".plot-data-summary summary").first().click();
+  await expect(page.locator(".plot-data-summary").first()).toContainText("Temperature range");
   await expect(page.locator(".plot-column")).toHaveCount(2);
   await expect(page.locator(".plot-column").first().locator(".scientific-plot-frame")).toHaveCount(2);
   await expect(page.locator(".plot-column").last().locator(".scientific-plot-frame")).toHaveCount(2);
@@ -141,7 +158,7 @@ test("reference simulation produces plots, validation evidence and export", asyn
 test("React owns result freshness, export feedback and stable plot mounting", async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 900 });
   await page.goto("./");
-  await page.getByRole("button", { name: "Run simulation" }).click();
+  await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Optothermal pulse completed" })).toBeVisible();
 
   const download = page.waitForEvent("download");
@@ -185,7 +202,7 @@ test("a worker failure is represented by React without leaving a stale running s
   });
   await page.setViewportSize({ width: 768, height: 900 });
   await page.goto("./");
-  await page.getByRole("button", { name: "Run simulation" }).click();
+  await page.getByRole("button", { name: "Run", exact: true }).click();
 
   await expect(page.getByText("Injected worker failure").first()).toBeVisible();
   await expect(page.getByText("Simulation failed", { exact: true }).first()).toBeVisible();
@@ -196,7 +213,7 @@ test("a worker failure is represented by React without leaving a stale running s
 test("all result panels remain reachable on a narrow mobile stage", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 720 });
   await page.goto("./");
-  await page.getByRole("button", { name: "Run simulation" }).click();
+  await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Optothermal pulse completed" })).toBeVisible();
   await expect(page.locator(".plot-surface")).toHaveCount(4);
 
@@ -232,7 +249,7 @@ test("help, theme and invalid-input states remain keyboard-accessible", async ({
   await duration.fill("2");
   await duration.press("Enter");
   await expect(page.getByText("Use at least six pulse FWHM so the Gaussian pulse is contained in the time window.").first()).toBeVisible();
-  await expect(page.getByRole("button", { name: "Run simulation" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Run", exact: true })).toBeDisabled();
 });
 
 test("an invalid visible draft cannot run a stale committed value", async ({ page }) => {
@@ -244,19 +261,17 @@ test("an invalid visible draft cannot run a stale committed value", async ({ pag
   await wavelength.blur();
 
   await expect(wavelength).toHaveAttribute("aria-invalid", "true");
-  await expect(page.getByRole("button", { name: "Run simulation" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Run", exact: true })).toBeDisabled();
 
   await page.getByRole("button", { name: "Reset preset" }).click();
   await expect(wavelength).toHaveValue("1.064");
-  await expect(page.getByRole("button", { name: "Run simulation" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Run", exact: true })).toBeEnabled();
 });
 
 test("plot controls stay outside the scientific data region", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("./");
-  await page.getByRole("button", { name: "Run simulation" }).click();
+  await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Optothermal pulse completed" })).toBeVisible();
 
   const firstFrame = page.locator(".scientific-plot-frame").first();
@@ -294,7 +309,7 @@ test("narrow configuration keeps the scientific stage out of the panel flow", as
 test("mobile export confirms the downloaded file inside the viewport", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("./");
-  await page.getByRole("button", { name: "Run simulation" }).click();
+  await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Optothermal pulse completed" })).toBeVisible();
 
   const download = page.waitForEvent("download");
@@ -342,7 +357,7 @@ test("validation provenance wraps technical paths without clipping", async ({ pa
 test("plots fit the viewport after reopening Results at a narrower size", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("./");
-  await page.getByRole("button", { name: "Run simulation" }).click();
+  await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(page.locator(".js-plotly-plot")).toHaveCount(4);
 
   await page.getByRole("button", { name: "Configure", exact: true }).click();
@@ -370,7 +385,7 @@ test("plots fit the viewport after reopening Results at a narrower size", async 
 test("mobile result metrics form a readable two-by-two summary", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("./");
-  await page.getByRole("button", { name: "Run simulation" }).click();
+  await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Optothermal pulse completed" })).toBeVisible();
 
   const metrics = page.locator(".scientific-outcome-summary .scientific-metric");
@@ -388,7 +403,7 @@ test("mobile result metrics form a readable two-by-two summary", async ({ page }
 test("scientific plot toolbar commands remain visible and actionable in dark theme", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("./");
-  await page.getByRole("button", { name: "Run simulation" }).click();
+  await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(page.locator(".scientific-plot-frame__toolbar .modebar-btn").first()).toBeVisible();
   await page.getByRole("button", { name: "Use dark theme" }).click();
 
