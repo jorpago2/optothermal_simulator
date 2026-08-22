@@ -42,6 +42,7 @@ import { getMeshDiagnostics, validateConfig, validateResult } from "./solver/val
 
 type AppView = "configure" | "results" | "validation";
 type MapView = "peak" | "final";
+type RunLifecycle = "idle" | "running" | "completed" | "failed" | "cancelled";
 
 const loadPlots = () => import("./components/Plots");
 const TemperatureTransientPlot = lazy(() => loadPlots().then((module) => ({ default: module.TemperatureTransientPlot })));
@@ -50,7 +51,7 @@ const RadialTemperaturePlot = lazy(() => loadPlots().then((module) => ({ default
 const TemperatureMapPlot = lazy(() => loadPlots().then((module) => ({ default: module.TemperatureMapPlot })));
 
 const workflow: WorkflowItem[] = [
-  { id: "configure", label: "Configure", controlsId: "configure-view", icon: <SettingsAdjust size={20} /> },
+  { id: "configure", label: "Configure", controlsId: "configuration-panel", icon: <SettingsAdjust size={20} /> },
   { id: "results", label: "Results", controlsId: "results-view", icon: <ChartLine size={20} /> },
   { id: "validation", label: "Validation", controlsId: "validation-view", icon: <CheckmarkOutline size={20} /> },
 ];
@@ -59,13 +60,17 @@ function cloneReferenceConfig(): OptothermalConfig {
   return { ...VO2_REFERENCE_CONFIG };
 }
 
-function downloadJson(config: OptothermalConfig, result: OptothermalResult) {
+function downloadJson(config: OptothermalConfig, result: OptothermalResult, quantitativeWarnings: readonly { id: string; message: string }[]) {
   const content = JSON.stringify({
     schema: "optothermal-simulator/result@2",
     generatedAt: new Date().toISOString(),
     model: "axisymmetric-rz-local-tmm-thermal@0.2",
     config,
     result,
+    interpretation: {
+      quantitativeUse: quantitativeWarnings.length ? "provisional" : "no-resolution-warnings",
+      quantitativeWarnings,
+    },
   }, null, 2);
   const url = URL.createObjectURL(new Blob([content], { type: "application/json" }));
   const link = document.createElement("a");
@@ -83,6 +88,7 @@ export function App() {
   const [lastRunConfig, setLastRunConfig] = useState<OptothermalConfig>();
   const [result, setResult] = useState<OptothermalResult>();
   const [busy, setBusy] = useState(false);
+  const [runLifecycle, setRunLifecycle] = useState<RunLifecycle>("idle");
   const [error, setError] = useState("");
   const [runtimeMs, setRuntimeMs] = useState<number>();
   const [mapView, setMapView] = useState<MapView>("peak");
@@ -102,18 +108,37 @@ export function App() {
   const hasErrors = issues.some((issue) => issue.severity === "error");
   const runBlocked = hasErrors || hasInvalidFields;
   const modified = Boolean(result && lastRunConfig && JSON.stringify(config) !== JSON.stringify(lastRunConfig));
+  const lastRunIssues = useMemo(() => lastRunConfig ? validateConfig(lastRunConfig) : [], [lastRunConfig]);
+  const quantitativeWarnings = useMemo(
+    () => lastRunIssues.filter((issue) => issue.severity === "warning"),
+    [lastRunIssues],
+  );
+  const resultIsStale = Boolean(result && (modified || busy || runLifecycle === "cancelled" || runLifecycle === "failed"));
 
   const status: ScientificStatusDescriptor = busy
     ? { state: "running", label: "Simulation running", detail: "Rust/WASM axisymmetric solve" }
-    : error
+    : runLifecycle === "cancelled"
+      ? { state: "modified", label: "Run cancelled", detail: "The previous result is retained; run again to refresh it." }
+      : error
       ? { state: "failed", label: "Simulation failed", detail: error }
-      : modified
-        ? { state: "modified", label: "Inputs modified", detail: "Run again to update the results." }
+        : modified
+          ? { state: "modified", label: "Inputs modified", detail: "Run again to update the results." }
         : result
-          ? { state: "up-to-date", label: "Results up to date", detail: "Fixed axial position" }
+          ? quantitativeWarnings.length
+            ? { state: "warning", label: "Results current · provisional", detail: "Fixed axial position; review resolution warnings before quantitative use." }
+            : { state: "up-to-date", label: "Results up to date", detail: "Fixed axial position" }
           : runBlocked
             ? { state: "needs-input", label: "Review inputs" }
             : { state: "ready", label: "Ready", detail: "VO₂ reference preset" };
+  const resultStatus: ScientificStatusDescriptor = busy
+    ? { state: "running", label: "Refreshing result", detail: "The previous result remains visible until this run completes." }
+    : runLifecycle === "cancelled"
+      ? { state: "modified", label: "Previous result retained", detail: "The last run was cancelled; values below are not a new result." }
+      : runLifecycle === "failed"
+        ? { state: "failed", label: "Previous result retained", detail: "The latest run failed; values below are from the last successful run." }
+        : modified
+          ? { state: "modified", label: "Result is stale", detail: "Inputs changed after this result; run again before interpreting or exporting it." }
+          : { state: "up-to-date", label: "Current result", detail: "Result matches the last completed configuration run." };
 
   const run = useCallback(async () => {
     if (!draftsAreValid() || validateConfig(config).some((issue) => issue.severity === "error")) {
@@ -122,6 +147,7 @@ export function App() {
     }
     const requestId = ++runRequestRef.current;
     setBusy(true);
+    setRunLifecycle("running");
     setError("");
     setExported(false);
     setActiveView("results");
@@ -132,11 +158,12 @@ export function App() {
       setResult(next);
       setLastRunConfig({ ...config });
       setRuntimeMs(performance.now() - started);
+      setRunLifecycle("completed");
     } catch (cause) {
       if (runRequestRef.current !== requestId) return;
-      setError(cause instanceof DOMException && cause.name === "AbortError"
-        ? "Simulation cancelled."
-        : cause instanceof Error ? cause.message : String(cause));
+      const cancelled = cause instanceof DOMException && cause.name === "AbortError";
+      setRunLifecycle(cancelled ? "cancelled" : "failed");
+      setError(cancelled ? "Simulation cancelled." : cause instanceof Error ? cause.message : String(cause));
     } finally {
       if (runRequestRef.current === requestId) setBusy(false);
     }
@@ -164,12 +191,14 @@ export function App() {
 
   const updateConfig = (field: keyof OptothermalConfig, value: number) => {
     setConfig((current) => ({ ...current, [field]: value }));
+    setRunLifecycle("idle");
     setError("");
   };
 
   const resetPreset = () => {
     resetValidity();
     setConfig(cloneReferenceConfig());
+    setRunLifecycle("idle");
     setError("");
   };
 
@@ -177,6 +206,7 @@ export function App() {
     runRequestRef.current += 1;
     cancelActiveSimulation();
     setBusy(false);
+    setRunLifecycle("cancelled");
     setError("Simulation cancelled.");
   };
 
@@ -187,7 +217,9 @@ export function App() {
       shortLabel: "Export",
       icon: DocumentExport,
       emphasis: "secondary",
-      onClick: () => { downloadJson(lastRunConfig, result); setExported(true); },
+      onClick: () => { downloadJson(lastRunConfig, result, quantitativeWarnings); setExported(true); },
+      disabled: busy || resultIsStale,
+      disabledReason: resultIsStale ? "Run the current configuration before exporting." : undefined,
     },
     {
       id: "rerun-model",
@@ -197,7 +229,7 @@ export function App() {
       onClick: () => { void run(); },
       disabled: busy || runBlocked,
     },
-  ] : [], [busy, lastRunConfig, result, run, runBlocked]);
+  ] : [], [busy, lastRunConfig, quantitativeWarnings, result, resultIsStale, run, runBlocked]);
 
   const preflightChecks = useMemo<ScientificCheckDescriptor[]>(() => {
     const pointsPerFwhm = (config.timeSteps - 1) * config.pulseFwhmNs / config.durationNs;
@@ -281,7 +313,7 @@ export function App() {
           }}
         />
       )}
-      panel={panelOpen ? (
+      panel={(
         <div id="configuration-panel">
           <ConfigurationPanel
             config={config}
@@ -295,7 +327,7 @@ export function App() {
             hasInvalidDrafts={hasInvalidFields}
           />
         </div>
-      ) : undefined}
+      )}
       statusBar={<ScientificStatusBar status={status} metadata={[`${config.radialCells} × ${config.substrateCells + 1} r–z cells · ${config.timeSteps} time samples · ${result ? result.engine : "Rust/WASM"}`]} />}
     >
       <div ref={stageRef} id="optothermal-workspace" className="optothermal-stage" tabIndex={-1}>
@@ -313,6 +345,7 @@ export function App() {
               <ScientificResultsLayout
                 title="Fixed-position response"
                 description="One Gaussian-beam position at z = 0; no axial sweep or detector propagation."
+                status={resultStatus}
                 actions={<ScientificResultsToolbar actions={resultActions} />}
               >
                 {exported && (
@@ -320,15 +353,23 @@ export function App() {
                     className="optothermal-export-receipt"
                     fileName="optothermal-vo2-result.json"
                     format="JSON"
-                    destination="Browser downloads"
+                    destination={`Browser downloads${quantitativeWarnings.length ? ` · ${quantitativeWarnings.length} quantitative warning${quantitativeWarnings.length === 1 ? "" : "s"} included` : ""}`}
                     onDismiss={() => setExported(false)}
                   />
                 )}
+                {quantitativeWarnings.length > 0 && <InlineNotification
+                  className="optothermal-quantitative-warning"
+                  kind="warning"
+                  title="Quantitative result is provisional"
+                  subtitle={`${quantitativeWarnings.map((issue) => issue.message).join(" ")} These warnings are retained in the exported JSON.`}
+                  lowContrast
+                  hideCloseButton
+                />}
                 <section ref={outcomeRef} tabIndex={-1}>
                   <ScientificOutcomeSummary
                     title="Optothermal pulse completed"
                     headingLevel={3}
-                    status={modified ? { state: "modified", label: "Result is stale" } : { state: "up-to-date", label: "Current result" }}
+                    status={resultStatus}
                     summary={result.metrics.maximumMetallicFraction > 0.5 ? "The reference model predicts a substantial thermally driven metallic fraction at the beam centre." : "The reference model remains predominantly on the insulating branch during this pulse."}
                     metrics={[
                       { id: "temperature", label: "Peak center temperature", value: result.metrics.maximumTemperatureC, unit: "°C", format: { significantDigits: 5 } },

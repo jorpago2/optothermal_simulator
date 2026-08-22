@@ -134,6 +134,10 @@ test("reference simulation produces plots, validation evidence and export", asyn
   await page.goto("./");
   await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Optothermal pulse completed" })).toBeVisible();
+  await expect(page.getByText("Quantitative result is provisional", { exact: true })).toBeVisible();
+  const resultsView = page.getByRole("region", { name: "Fixed-position response" });
+  await expect(resultsView.getByText(/0\.04 cells/)).toBeVisible();
+  await expect(resultsView.getByText(/film is represented by one control volume/)).toBeVisible();
   await expect(page.locator(".plot-surface")).toHaveCount(4);
   await expect(page.locator(".plot-data-summary")).toHaveCount(4);
   await page.locator(".plot-data-summary summary").first().click();
@@ -174,7 +178,8 @@ test("React owns result freshness, export feedback and stable plot mounting", as
   await expect(page.getByText("Inputs modified", { exact: true }).first()).toBeVisible();
 
   await page.getByRole("button", { name: "Results", exact: true }).click();
-  await expect(page.getByText("Result is stale", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Optothermal pulse completed").getByText("Result is stale", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Export result" })).toBeDisabled();
   await expect(page.locator(".js-plotly-plot")).toHaveCount(4);
 
   await page.getByRole("button", { name: "Validation", exact: true }).click();

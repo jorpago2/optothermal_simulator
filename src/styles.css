@@ -336,6 +336,11 @@ textarea {
   margin-block-end: var(--scientific-ui-spacing-03);
 }
 
+.optothermal-quantitative-warning {
+  max-inline-size: none;
+  margin-block-end: var(--scientific-ui-spacing-05);
+}
+
 .scientific-plot-surface .modebar {
   font-family: var(--scientific-ui-font-sans, "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif);
 }
