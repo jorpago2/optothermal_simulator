@@ -403,6 +403,33 @@ test("mobile result metrics form a readable two-by-two summary", async ({ page }
   expect(new Set(boxes.map((box) => box.left)).size).toBe(2);
   expect(Math.min(...boxes.map((box) => box.width))).toBeGreaterThanOrEqual(120);
   expect(Math.max(...boxes.map((box) => box.height))).toBeLessThanOrEqual(160);
+
+  const stage = page.locator(".scientific-workbench__stage");
+  expect(await stage.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+  await expect(page.locator(".scientific-outcome-summary__heading .scientific-status__content span")).toHaveCSS("white-space", "normal");
+});
+
+test("compact scientific context truncates without cutting into the workspace", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("./");
+
+  const context = page.locator(".scientific-header__context-value");
+  await expect(context).toHaveCSS("text-overflow", "ellipsis");
+  await expect(context).toHaveCSS("white-space", "nowrap");
+  expect(await context.evaluate((element) => element.scrollWidth)).toBeGreaterThan(await context.evaluate((element) => element.clientWidth));
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+});
+
+test("tablet outcome keeps the title and status readable", async ({ page }) => {
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await page.goto("./");
+  await page.getByRole("button", { name: "Run", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Optothermal pulse completed" })).toBeVisible();
+
+  const heading = page.locator(".scientific-outcome-summary__heading");
+  await expect(heading).toHaveCSS("flex-direction", "column");
+  const stage = page.locator(".scientific-workbench__stage");
+  expect(await stage.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
 });
 
 test("scientific plot toolbar commands remain visible and actionable in dark theme", async ({ page }) => {
