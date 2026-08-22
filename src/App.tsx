@@ -370,7 +370,9 @@ export function App() {
                     title="Optothermal pulse completed"
                     headingLevel={3}
                     status={resultStatus}
-                    summary={result.metrics.maximumMetallicFraction > 0.5 ? "The reference model predicts a substantial thermally driven metallic fraction at the beam centre." : "The reference model remains predominantly on the insulating branch during this pulse."}
+                    summary={result.metrics.maximumMetallicFraction > 0.5
+                      ? `The reference model predicts a substantial thermally driven metallic fraction at the beam centre. Optical coupling starts from A₀ = ${result.metrics.baselineAbsorptance.toPrecision(4)} and deposits ${result.metrics.absorbedEnergyJ.toPrecision(4)} J in the simulated domain.`
+                      : `The reference model remains predominantly on the insulating branch during this pulse. Optical coupling starts from A₀ = ${result.metrics.baselineAbsorptance.toPrecision(4)} and deposits ${result.metrics.absorbedEnergyJ.toPrecision(4)} J in the simulated domain.`}
                     metrics={[
                       { id: "temperature", label: "Peak center temperature", value: result.metrics.maximumTemperatureC, unit: "°C", format: { significantDigits: 5 } },
                       { id: "phase", label: "Maximum metallic fraction", value: result.metrics.maximumMetallicFraction, format: { significantDigits: 4 } },
@@ -378,6 +380,16 @@ export function App() {
                       { id: "runtime", label: "Browser runtime", value: runtimeMs ? runtimeMs / 1000 : 0, unit: "s", format: { significantDigits: 3 } },
                     ]}
                   />
+                  <section className="optothermal-coupling" aria-labelledby="optothermal-coupling-title">
+                    <h4 id="optothermal-coupling-title">Optical → thermal coupling</h4>
+                    <dl>
+                      <div><dt>Baseline reflectance R₀</dt><dd>{result.metrics.baselineReflectance.toPrecision(5)}</dd></div>
+                      <div><dt>Baseline transmittance T₀</dt><dd>{result.metrics.baselineTransmittance.toPrecision(5)}</dd></div>
+                      <div><dt>Baseline absorptance A₀</dt><dd>{result.metrics.baselineAbsorptance.toPrecision(5)}</dd></div>
+                      <div><dt>Stored / absorbed energy</dt><dd>{(100 * result.metrics.storedToAbsorbedRatio).toFixed(2)}%</dd></div>
+                    </dl>
+                    <p>R/T/A are the thin-film optical balance at the reference state; the thermal solver uses the local absorptance as its heat source. They are not detector-plane observables.</p>
+                  </section>
                 </section>
                 <Suspense fallback={<p className="plot-loading" role="status">Loading scientific plots…</p>}>
                   <Grid fullWidth narrow className="plot-grid">

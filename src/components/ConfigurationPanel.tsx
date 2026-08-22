@@ -135,10 +135,10 @@ export function ConfigurationPanel({ config, issues, busy, onChange, onReset, on
       <ScientificParameterSection title="Geometry" columns={1}>
         <Fields definitions={geometryFields} config={config} issues={issues} onChange={onChange} onFieldValidationChange={onFieldValidationChange} fieldRevision={fieldRevision} />
       </ScientificParameterSection>
-      <ScientificParameterSection title="Optical and phase model" description="Reference values are sample-dependent and should be replaced by measured ellipsometry." columns={1} collapsible defaultOpen={false}>
+      <ScientificParameterSection title="Optical and phase model" description="Thin-film TMM converts n/k into local absorptance A(λ,T); reference values should be replaced by measured ellipsometry." columns={1} collapsible defaultOpen={false}>
         <Fields definitions={opticalFields} config={config} issues={issues} onChange={onChange} onFieldValidationChange={onFieldValidationChange} fieldRevision={fieldRevision} />
       </ScientificParameterSection>
-      <ScientificParameterSection title="Thermal properties" columns={1} collapsible defaultOpen={false}>
+      <ScientificParameterSection title="Thermal properties" description="Homogeneous, isotropic properties; convection applies at the air-side outer boundary." columns={1} collapsible defaultOpen={false}>
         <Fields definitions={thermalFields} config={config} issues={issues} onChange={onChange} onFieldValidationChange={onFieldValidationChange} fieldRevision={fieldRevision} />
       </ScientificParameterSection>
       <ScientificParameterSection title="Numerical mesh" description="The implicit solver is stable for large steps, but the pulse still requires temporal resolution." columns={1} collapsible defaultOpen={false}>

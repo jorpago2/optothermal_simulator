@@ -341,6 +341,46 @@ textarea {
   margin-block-end: var(--scientific-ui-spacing-05);
 }
 
+.optothermal-coupling {
+  margin-block-start: var(--scientific-ui-spacing-05);
+  padding: var(--scientific-ui-spacing-05);
+  border-inline-start: 3px solid var(--cds-border-interactive);
+  background: var(--cds-layer-01);
+}
+
+.optothermal-coupling h4 {
+  margin: 0 0 var(--scientific-ui-spacing-03);
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.optothermal-coupling dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--scientific-ui-spacing-04);
+  margin: 0;
+}
+
+.optothermal-coupling dt {
+  color: var(--cds-text-secondary);
+  font-size: .75rem;
+  line-height: 1rem;
+}
+
+.optothermal-coupling dd {
+  margin: var(--scientific-ui-spacing-02) 0 0;
+  font-family: var(--scientific-ui-font-mono, "IBM Plex Mono", monospace);
+  font-variant-numeric: tabular-nums;
+}
+
+.optothermal-coupling p {
+  max-inline-size: 70ch;
+  margin: var(--scientific-ui-spacing-04) 0 0;
+  color: var(--cds-text-secondary);
+  font-size: .75rem;
+  line-height: 1.4;
+}
+
 .scientific-plot-surface .modebar {
   font-family: var(--scientific-ui-font-sans, "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif);
 }
@@ -373,6 +413,13 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
+@media (max-width: 65.99rem) {
+  /* Configuration is a focused task view at tablet and mobile widths. */
+  .optothermal-app[data-panel-open] > main > :last-child {
+    display: none;
+  }
+}
+
 @media (max-width: 671px) {
   .validation-grid,
   .configuration-overview-grid {
@@ -382,6 +429,10 @@ textarea {
   .plot-surface,
   .plot-surface--map {
     height: 18rem;
+  }
+
+  .optothermal-coupling dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .experiment-diagram {
