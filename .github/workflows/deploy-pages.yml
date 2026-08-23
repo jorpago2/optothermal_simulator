@@ -33,6 +33,13 @@ jobs:
       - run: pnpm check:conformance
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:ui
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failure
+          path: test-results
+          if-no-files-found: ignore
       - run: pnpm build
       - uses: actions/upload-pages-artifact@v5
         with:
