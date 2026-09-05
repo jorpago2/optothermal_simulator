@@ -424,10 +424,6 @@ textarea {
   word-break: normal;
 }
 
-@container (max-width: 20rem) {
-  .optothermal-results .scientific-metric-grid[data-count="4"] .scientific-metric { grid-column: span 4; }
-}
-
 @media (max-width: 65.99rem) {
   /* Configuration is a focused task view at tablet and mobile widths. */
   .optothermal-app[data-panel-open] > main > :last-child {
@@ -448,12 +444,6 @@ textarea {
 
   .optothermal-coupling dl {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .optothermal-results .scientific-results-layout__header,
-  .optothermal-results .scientific-outcome-summary__metrics,
-  .optothermal-results .scientific-outcome-summary__grid {
-    padding-block: var(--scientific-ui-spacing-04);
   }
 
   .optothermal-results .scientific-metric {
