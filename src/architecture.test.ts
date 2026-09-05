@@ -51,7 +51,7 @@ describe("React interface ownership", () => {
     const usages = sources.flatMap(({ path, text }) => [...text.matchAll(/\bdocument\.([A-Za-z]+)/g)].map((match) => `${path}:document.${match[1]}`)).sort();
 
     expect(usages).toEqual([
-      "src/App.tsx:document.createElement",
+      "src/download.ts:document.createElement",
       "src/main.tsx:document.getElementById",
     ]);
   });

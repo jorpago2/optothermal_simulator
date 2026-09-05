@@ -36,7 +36,7 @@ function PlotDataSummary({ entries }: { entries: Array<[string, string]> }) {
   </details>;
 }
 
-function usePlot(
+export function usePlot(
   ref: React.RefObject<HTMLDivElement | null>,
   data: Plotly.Data[],
   layout: Partial<Plotly.Layout>,
@@ -88,7 +88,7 @@ export function TemperatureTransientPlot({ result }: { result: OptothermalResult
     yaxis: { title: { text: "Center temperature (°C)" } },
     showlegend: false,
   }, [result]);
-  return <ScientificPlotFrame title="Center temperature" description="Film temperature at r = 0." status={<PlotDataSummary entries={[
+  return <ScientificPlotFrame title="Center temperature" description="Air-side film cell temperature at r = 0." status={<PlotDataSummary entries={[
     ["Samples", `${result.timeNs.length}`],
     ["Time range", numericRange(result.timeNs, "ns")],
     ["Temperature range", numericRange(result.centerTemperatureC, "°C")],
@@ -116,7 +116,7 @@ export function PhaseTransientPlot({ result }: { result: OptothermalResult }) {
     yaxis2: { title: { text: "Absorptance" }, overlaying: "y", side: "right", range: [0, 1] },
     showlegend: false,
   }, [result]);
-  return <ScientificPlotFrame title="Material response" description="Thermal VO₂ state and corresponding thin-film absorptance." legend={[{ id: "phase", label: "Metallic fraction", color: "#0072b2" }, { id: "absorption", label: "Absorptance", color: "#009e73" }]} status={<PlotDataSummary entries={[
+  return <ScientificPlotFrame title="Material response" description="Effective phase driven by thickness-averaged temperature, and corresponding film absorptance." legend={[{ id: "phase", label: "Metallic fraction", color: "#0072b2" }, { id: "absorption", label: "Absorptance", color: "#009e73" }]} status={<PlotDataSummary entries={[
     ["Samples", `${result.timeNs.length}`],
     ["Metallic fraction range", numericRange(result.centerMetallicFraction)],
     ["Absorptance range", numericRange(result.centerAbsorptance)],
@@ -155,11 +155,12 @@ export function TemperatureMapPlot({ result, view }: { result: OptothermalResult
   const ref = useRef<HTMLDivElement>(null);
   const values = view === "peak" ? result.peakTemperatureMapC : result.finalTemperatureMapC;
   const visibleDepthUm = Math.min(4, Math.abs(result.depthUm[0] ?? 0));
-  const surfaceUm = result.depthUm.at(-1) ?? 0;
+  const surfaceUm = result.depthEdgesUm.at(-1) ?? 0;
   usePlot(ref, [{
     type: "heatmap",
     x: result.radiusUm,
-    y: result.depthUm,
+    // Explicit cell edges preserve non-uniform widths and the interface at z = 0.
+    y: result.depthEdgesUm,
     z: values,
     colorscale: "Inferno",
     colorbar: { title: { text: "T (°C)", side: "right" }, thickness: 12 },

@@ -1,16 +1,16 @@
 import wasmUrl from "../wasm/optothermal_core.wasm?url";
 import type { OptothermalConfig, OptothermalResult } from "./types";
 import { serializeConfig } from "./protocol";
-import { assertValidResult, validateConfig } from "./validation";
+import { assertValidResult, thermalDepthEdges, validateConfig } from "./validation";
 
-const RESULT_SCHEMA_VERSION = 2;
+const RESULT_SCHEMA_VERSION = 3;
 const RESULT_HEADER_LENGTH = 29;
 
 interface CoreExports extends WebAssembly.Exports {
   memory: WebAssembly.Memory;
   allocate_f64(length: number): number;
   deallocate_f64(pointer: number, capacity: number): void;
-  output_length(timeSteps: number, radialCells: number, substrateCells: number): number;
+  output_length(timeSteps: number, radialCells: number, substrateCells: number, filmCells: number): number;
   run_simulation(configPointer: number, configLength: number, outputPointer: number, outputCapacity: number): number;
 }
 
@@ -76,7 +76,7 @@ export async function runWasmSimulation(config: OptothermalConfig): Promise<Opto
   }
   const core = await loadCore();
   const serialized = serializeConfig(config);
-  const outputLength = core.output_length(config.timeSteps, config.radialCells, config.substrateCells);
+  const outputLength = core.output_length(config.timeSteps, config.radialCells, config.substrateCells, config.filmCells);
   if (!Number.isSafeInteger(outputLength) || outputLength < RESULT_HEADER_LENGTH) {
     throw new Error("The WASM solver rejected the requested output dimensions.");
   }
@@ -109,7 +109,7 @@ export async function runWasmSimulation(config: OptothermalConfig): Promise<Opto
     if (![nt, nr, nz].every(Number.isSafeInteger)
       || nt !== config.timeSteps
       || nr !== config.radialCells
-      || nz !== config.substrateCells + 1) {
+      || nz !== config.substrateCells + config.filmCells) {
       throw new Error("The WASM solver returned dimensions that do not match the requested mesh.");
     }
     const cursor = { value: RESULT_HEADER_LENGTH };
@@ -122,6 +122,7 @@ export async function runWasmSimulation(config: OptothermalConfig): Promise<Opto
       finalSurfaceTemperatureC: take(values, cursor, nr, "final surface temperature"),
       peakSurfaceTemperatureC: take(values, cursor, nr, "peak surface temperature"),
       depthUm: take(values, cursor, nz, "depth"),
+      depthEdgesUm: thermalDepthEdges(config),
       finalTemperatureMapC: matrix(values, cursor, nz, nr, "final temperature map"),
       peakTemperatureMapC: matrix(values, cursor, nz, nr, "peak temperature map"),
       metrics: {

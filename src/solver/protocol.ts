@@ -62,6 +62,8 @@ export function serializeConfig(config: OptothermalConfig): Float64Array {
     config.substrateHeatCapacityJKgK,
     config.substrateConductivityWMK,
     config.convectionWM2K,
+    config.filmCells,
+    config.substrateGrading,
     0,
   ]);
 }

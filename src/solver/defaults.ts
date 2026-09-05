@@ -30,7 +30,9 @@ export const VO2_REFERENCE_CONFIG: OptothermalConfig = {
   convectionWM2K: 5,
   timeSteps: 241,
   radialCells: 65,
-  substrateCells: 32,
+  substrateCells: 96,
+  filmCells: 24,
+  substrateGrading: 6,
 };
 
 export const AMBIENT_CHECK_CONFIG: OptothermalConfig = {

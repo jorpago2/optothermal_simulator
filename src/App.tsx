@@ -7,6 +7,7 @@ import {
   Restart,
   SettingsAdjust,
   TemperatureHot,
+  DataTable,
 } from "@carbon/react/icons";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -38,12 +39,14 @@ import {
 } from "@jorpago2/scientific-ui";
 import { ConfigurationPanel } from "./components/ConfigurationPanel";
 import { ExperimentOverview } from "./components/ExperimentOverview";
+import { Studies, type ConvergenceEvidence } from "./components/Studies";
+import { downloadJsonFile } from "./download";
 import { VO2_REFERENCE_CONFIG } from "./solver/defaults";
 import { cancelActiveSimulation, runSimulation } from "./solver/workerClient";
 import type { OptothermalConfig, OptothermalResult } from "./solver/types";
-import { getMeshDiagnostics, isOptothermalConfig, validateConfig, validateResult } from "./solver/validation";
+import { getMeshDiagnostics, isSavedOptothermalConfig, restoreMeshConfig, validateConfig, validateResult, type SavedOptothermalConfig } from "./solver/validation";
 
-type AppView = "configure" | "results" | "validation";
+type AppView = "configure" | "results" | "validation" | "studies";
 type MapView = "peak" | "final";
 type RunLifecycle = "idle" | "running" | "completed" | "failed" | "cancelled";
 
@@ -52,36 +55,32 @@ const TemperatureTransientPlot = lazy(() => loadPlots().then((module) => ({ defa
 const PhaseTransientPlot = lazy(() => loadPlots().then((module) => ({ default: module.PhaseTransientPlot })));
 const RadialTemperaturePlot = lazy(() => loadPlots().then((module) => ({ default: module.RadialTemperaturePlot })));
 const TemperatureMapPlot = lazy(() => loadPlots().then((module) => ({ default: module.TemperatureMapPlot })));
+const DepthProfiles = lazy(() => import("./components/DepthProfiles").then((module) => ({ default: module.DepthProfiles })));
 
 const workflow: WorkflowItem[] = [
   { id: "configure", label: "Configure", controlsId: "configuration-panel", icon: <SettingsAdjust size={20} /> },
   { id: "results", label: "Results", controlsId: "results-view", icon: <ChartLine size={20} /> },
   { id: "validation", label: "Validation", controlsId: "validation-view", icon: <CheckmarkOutline size={20} /> },
+  { id: "studies", label: "Studies", controlsId: "studies-view", icon: <DataTable size={20} /> },
 ];
 
 function cloneReferenceConfig(): OptothermalConfig {
   return { ...VO2_REFERENCE_CONFIG };
 }
 
-function downloadJson(config: OptothermalConfig, result: OptothermalResult, quantitativeWarnings: readonly { id: string; message: string }[]) {
-  const content = JSON.stringify({
-    schema: "optothermal-simulator/result@2",
+function downloadJson(config: OptothermalConfig, result: OptothermalResult, quantitativeWarnings: readonly { id: string; message: string }[], convergence?: ConvergenceEvidence) {
+  downloadJsonFile({
+    schema: "optothermal-simulator/result@3",
     generatedAt: new Date().toISOString(),
-    model: "axisymmetric-rz-local-tmm-thermal@0.2",
+    model: "axisymmetric-rz-local-tmm-thermal@0.3",
     config,
     result,
+    convergence,
     interpretation: {
       quantitativeUse: quantitativeWarnings.length ? "provisional" : "no-resolution-warnings",
       quantitativeWarnings,
     },
-  }, null, 2);
-  const url = URL.createObjectURL(new Blob([content], { type: "application/json" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "optothermal-vo2-result.json";
-  link.click();
-  // Let the browser finish consuming the download URL before releasing it.
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }, "optothermal-vo2-result.json");
 }
 
 export function App() {
@@ -91,6 +90,9 @@ export function App() {
   const [lastRunConfig, setLastRunConfig] = useState<OptothermalConfig>();
   const [result, setResult] = useState<OptothermalResult>();
   const [busy, setBusy] = useState(false);
+  const [studyBusy, setStudyBusy] = useState(false);
+  const [convergence, setConvergence] = useState<ConvergenceEvidence>();
+  const studyStopRef = useRef<(() => void) | null>(null);
   const [runLifecycle, setRunLifecycle] = useState<RunLifecycle>("idle");
   const [error, setError] = useState("");
   const [runtimeMs, setRuntimeMs] = useState<number>();
@@ -107,11 +109,11 @@ export function App() {
     resetValidity,
     revision: fieldRevision,
   } = useScientificFormValidity();
-  const restoreConfiguration = useCallback((saved: OptothermalConfig) => {
+  const restoreConfiguration = useCallback((saved: SavedOptothermalConfig) => {
     runRequestRef.current += 1;
     cancelActiveSimulation();
     resetValidity();
-    setConfig({ ...saved });
+    setConfig(restoreMeshConfig(saved));
     setLastRunConfig(undefined);
     setResult(undefined);
     setBusy(false);
@@ -122,11 +124,11 @@ export function App() {
     setActiveView("configure");
     setConfigurationOpen(true);
   }, [resetValidity]);
-  const autosave = useScientificAutosave({
+  const autosave = useScientificAutosave<SavedOptothermalConfig>({
     storageKey: "optothermal-simulator:session",
     value: config,
     schemaVersion: 1,
-    validate: isOptothermalConfig,
+    validate: isSavedOptothermalConfig,
     onRestore: restoreConfiguration,
   });
   const issues = useMemo(() => validateConfig(config), [config]);
@@ -134,9 +136,12 @@ export function App() {
   const runBlocked = hasErrors || hasInvalidFields;
   const modified = Boolean(result && lastRunConfig && JSON.stringify(config) !== JSON.stringify(lastRunConfig));
   const lastRunIssues = useMemo(() => lastRunConfig ? validateConfig(lastRunConfig) : [], [lastRunConfig]);
+  const currentConvergence = convergence && lastRunConfig && JSON.stringify(convergence.config) === JSON.stringify(lastRunConfig) ? convergence : undefined;
   const quantitativeWarnings = useMemo(
-    () => lastRunIssues.filter((issue) => issue.severity === "warning"),
-    [lastRunIssues],
+    () => [...lastRunIssues.filter((issue) => issue.severity === "warning"), currentConvergence
+      ? { id: "refinement-scope", message: `A refinement comparison is available in Studies (${currentConvergence.complete ? "completed" : "partial"}; ${currentConvergence.comparisons.length} directions checked). Pairwise agreement does not establish universal convergence or validate the material model.` }
+      : { id: "refinement-pending", message: "A mesh/time refinement comparison has not been run. Resolution checks alone do not establish quantitative convergence." }],
+    [lastRunIssues, currentConvergence],
   );
   const resultIsStale = Boolean(result && (modified || busy || runLifecycle === "cancelled" || runLifecycle === "failed"));
 
@@ -166,6 +171,7 @@ export function App() {
           : { state: "up-to-date", label: "Current result", detail: "Result matches the last completed configuration run." };
 
   const run = useCallback(async () => {
+    if (studyBusy) return;
     if (!draftsAreValid() || validateConfig(config).some((issue) => issue.severity === "error")) {
       setActiveView("configure");
       return;
@@ -192,7 +198,7 @@ export function App() {
     } finally {
       if (runRequestRef.current === requestId) setBusy(false);
     }
-  }, [config, draftsAreValid]);
+  }, [config, draftsAreValid, studyBusy]);
 
   useEffect(() => {
     stageRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
@@ -242,7 +248,7 @@ export function App() {
       shortLabel: "Export",
       icon: DocumentExport,
       emphasis: "secondary",
-      onClick: () => { downloadJson(lastRunConfig, result, quantitativeWarnings); setExported(true); },
+      onClick: () => { downloadJson(lastRunConfig, result, quantitativeWarnings, currentConvergence); setExported(true); },
       disabled: busy || resultIsStale,
       disabledReason: resultIsStale ? "Run the current configuration before exporting." : undefined,
     },
@@ -252,21 +258,22 @@ export function App() {
       icon: Restart,
       emphasis: "ghost",
       onClick: () => { void run(); },
-      disabled: busy || runBlocked,
+      disabled: busy || studyBusy || runBlocked,
     },
-  ] : [], [busy, lastRunConfig, quantitativeWarnings, result, resultIsStale, run, runBlocked]);
+    { id: "compare-case", label: "Compare and save", icon: DataTable, emphasis: "ghost", onClick: () => { setActiveView("studies"); setConfigurationOpen(false); } },
+  ] : [], [busy, studyBusy, lastRunConfig, quantitativeWarnings, currentConvergence, result, resultIsStale, run, runBlocked]);
 
   const preflightChecks = useMemo<ScientificCheckDescriptor[]>(() => {
     const pointsPerFwhm = (config.timeSteps - 1) * config.pulseFwhmNs / config.durationNs;
-    const meshCells = config.radialCells * (config.substrateCells + 1);
+    const meshCells = config.radialCells * (config.substrateCells + config.filmCells);
     const mesh = getMeshDiagnostics(config);
     return [
       { id: "input", label: "Parameter ranges", state: runBlocked ? "failed" : "passed", detail: hasInvalidFields ? "A visible field contains an uncommitted invalid value." : hasErrors ? "Correct the blocking input messages." : "All required values are finite and within solver limits." },
       { id: "time", label: "Pulse resolution", state: pointsPerFwhm >= 16 ? "passed" : "warning", value: `${pointsPerFwhm.toFixed(1)} points/FWHM`, detail: "Implicit integration removes a stability restriction but not temporal discretization error." },
       { id: "radius", label: "Radial boundary", state: config.radiusUm >= 4 * config.waistUm ? "passed" : "warning", value: `${(config.radiusUm / config.waistUm).toFixed(1)} w₀`, detail: "A boundary at four beam waists limits interaction with the heated region." },
       { id: "source-mesh", label: "Gaussian source resolution", state: mesh.pointsPerWaist < 2 ? "failed" : mesh.pointsPerWaist < 8 ? "warning" : "passed", value: `${mesh.pointsPerWaist.toFixed(2)} cells/w₀`, detail: `Radial spacing ${mesh.radialSpacingUm.toPrecision(3)} µm; at least 8 intervals per waist are recommended for quantitative work.` },
-      { id: "depth-mesh", label: "Substrate diffusion resolution", state: mesh.cellsPerSubstrateDiffusionLength < 0.01 ? "failed" : mesh.cellsPerSubstrateDiffusionLength < 4 ? "warning" : "passed", value: `${mesh.cellsPerSubstrateDiffusionLength.toPrecision(3)} cells/Ld`, detail: `Depth spacing ${mesh.substrateSpacingUm.toPrecision(3)} µm; pulse diffusion length ${mesh.substrateDiffusionLengthUm.toPrecision(3)} µm.` },
-      { id: "film-mesh", label: "Film control volume", state: config.filmThicknessNm > mesh.filmDiffusionLengthNm ? "warning" : "passed", value: `1 cell · Ld ${mesh.filmDiffusionLengthNm.toPrecision(3)} nm`, detail: "The current model treats the entire film thickness as one thermal control volume." },
+      { id: "depth-mesh", label: "Substrate diffusion resolution", state: !Number.isFinite(mesh.cellsPerSubstrateDiffusionLength) || mesh.cellsPerSubstrateDiffusionLength < 0.01 ? "failed" : mesh.cellsPerSubstrateDiffusionLength < 4 ? "warning" : "passed", value: Number.isFinite(mesh.cellsPerSubstrateDiffusionLength) ? `${mesh.cellsPerSubstrateDiffusionLength.toPrecision(3)} cells/Ld` : "Invalid mesh", detail: Number.isFinite(mesh.cellsPerSubstrateDiffusionLength) ? `Largest cell intersecting the pulse diffusion layer: ${(mesh.substrateDiffusionSpacingUm * 1000).toPrecision(3)} nm; diffusion length ${(mesh.substrateDiffusionLengthUm * 1000).toPrecision(3)} nm. Grading ${config.substrateGrading} (0 is uniform).` : "Correct substrate cell count and grading." },
+      { id: "film-mesh", label: "Film depth resolution", state: !Number.isInteger(config.filmCells) || config.filmCells < 1 || config.filmCells > 64 ? "failed" : mesh.cellsPerFilmDiffusionLength < 4 ? "warning" : "passed", value: `${config.filmCells} cells · ${mesh.cellsPerFilmDiffusionLength.toPrecision(3)} cells/Ld`, detail: `Cell thickness ${mesh.filmSpacingNm.toPrecision(3)} nm; pulse diffusion length ${mesh.filmDiffusionLengthNm.toPrecision(3)} nm. Thermal depth is resolved; the optical phase remains an effective film value.` },
       { id: "mesh", label: "Browser mesh", state: meshCells <= 40_000 ? "passed" : "failed", value: `${meshCells.toLocaleString()} cells`, detail: "The hard limit bounds worker memory and interaction latency." },
     ];
   }, [config, hasErrors, hasInvalidFields, runBlocked]);
@@ -283,19 +290,19 @@ export function App() {
       { id: "linear", label: "Linear convergence", state: checks.converged ? "passed" : "failed", value: `r = ${result.metrics.worstLinearResidual.toExponential(2)}`, detail: `Worst step ${result.metrics.worstLinearStep}; ${result.metrics.maximumLinearIterations} maximum iterations; tolerance ${result.metrics.linearResidualTolerance.toExponential(1)}.` },
       { id: "passive", label: "Optical passivity", state: checks.passive ? "passed" : "failed", value: `Araw = ${result.metrics.minimumAbsorptanceRaw.toFixed(4)}–${result.metrics.maximumAbsorptanceRaw.toFixed(4)}`, detail: `Raw baseline balance: R ${result.metrics.baselineReflectance.toFixed(5)} + T ${result.metrics.baselineTransmittance.toFixed(5)} + A ${result.metrics.baselineAbsorptanceRaw.toFixed(5)}.` },
       { id: "energy", label: "Thermal energy bound", state: checks.energyBound ? "passed" : "failed", value: `${(100 * result.metrics.storedToAbsorbedRatio).toFixed(2)}% stored/absorbed`, detail: "Stored sensible heat cannot exceed integrated absorbed optical energy." },
-      { id: "convergence", label: "Mesh convergence", state: "warning", detail: "A refinement comparison has not been run. Treat quantitative values as provisional." },
+      { id: "convergence", label: "Mesh convergence", state: "warning", detail: currentConvergence ? `${currentConvergence.comparisons.length} independent refinement comparisons available in Studies; ${currentConvergence.comparisons.filter((entry) => entry.comparison.status === "outside-tolerance").length} exceed the selected tolerance. ${currentConvergence.skipped.length} skipped. Quantitative use remains provisional.` : "A refinement comparison has not been run. Treat quantitative values as provisional." },
     ];
-  }, [result]);
+  }, [result, currentConvergence]);
 
   const validationPassed = result ? validateResult(result) : undefined;
   const validationStatus: ScientificStatusDescriptor = !result
     ? { state: "needs-input", label: "Not evaluated" }
     : validationPassed && Object.values(validationPassed).every(Boolean)
-      ? { state: "warning", label: "Core checks passed; convergence pending" }
+      ? { state: "warning", label: currentConvergence ? "Core checks passed; refinement available" : "Core checks passed; convergence pending" }
       : { state: "failed", label: "Validation check failed" };
 
   const panelOpen = activeView === "configure" && configurationOpen;
-  const navigationItems = workflow.map((item) => item.id === "results" && busy ? { ...item, status: "loading" as const, statusLabel: "Simulation running" } : item);
+  const navigationItems = workflow.map((item) => item.id === "results" && busy ? { ...item, status: "loading" as const, statusLabel: "Simulation running" } : item.id === "studies" && studyBusy ? { ...item, status: "loading" as const, statusLabel: "Study running" } : item);
 
   return (
     <ScientificAppShell
@@ -319,8 +326,8 @@ export function App() {
           productMark={<TemperatureHot size={24} aria-hidden="true" />}
           contextLabel="FIXED POSITION"
           context={`z = 0 · λ ${config.wavelengthUm} µm`}
-          status={status}
-          primaryAction={<ScientificRunControl execution={{ ...status, onRun: () => { void run(); }, onStop: stop, runLabel: "Run", stopLabel: "Stop", disabled: runBlocked, disabledReason: runBlocked ? "Review invalid inputs before running." : undefined }} size="sm" />}
+          status={studyBusy ? { state: "running", label: "Study running" } : status}
+          primaryAction={<ScientificRunControl execution={{ ...(studyBusy ? { state: "running" as const, label: "Study running" } : status), onRun: () => { void run(); }, onStop: studyBusy ? () => { studyStopRef.current?.(); } : stop, runLabel: "Run", stopLabel: "Stop", disabled: runBlocked && !studyBusy, disabledReason: runBlocked ? "Review invalid inputs before running." : undefined }} size="sm" />}
           help={{
             summary: "Configure a single axial position, run the Rust/WASM r–z solver, then inspect temperature, phase state and validation evidence.",
             footer: "The reference material values are not a substitute for sample-specific calibration.",
@@ -352,7 +359,7 @@ export function App() {
           <ConfigurationPanel
             config={config}
             issues={issues}
-            busy={busy}
+            busy={busy || studyBusy}
             onChange={updateConfig}
             onReset={resetPreset}
             onClose={() => setConfigurationOpen(false)}
@@ -362,7 +369,7 @@ export function App() {
           />
         </div>
       )}
-      statusBar={<ScientificStatusBar status={status} metadata={<><ScientificAutosaveStatus status={autosave.status} savedAt={autosave.lastSavedAt} /><span>{`${config.radialCells} × ${config.substrateCells + 1} r–z cells · ${config.timeSteps} time samples · ${result ? result.engine : "Rust/WASM"}`}</span></>} />}
+      statusBar={<ScientificStatusBar status={studyBusy ? { state: "running", label: "Study running" } : status} metadata={<><ScientificAutosaveStatus status={autosave.status} savedAt={autosave.lastSavedAt} /><span>{`${config.radialCells} × ${config.substrateCells + config.filmCells} r–z cells · ${config.timeSteps} time samples · ${result ? result.engine : "Rust/WASM"}`}</span></>} />}
     >
       <div ref={stageRef} id="optothermal-workspace" className="optothermal-stage" tabIndex={-1}>
         <h1 className="optothermal-visually-hidden">Optothermal Simulator</h1>
@@ -430,6 +437,7 @@ export function App() {
                       </div>
                     </Column>
                   </Grid>
+                  {lastRunConfig && <DepthProfiles result={result} config={lastRunConfig} />}
                 </Suspense>
                 <section className="optothermal-coupling" aria-labelledby="optothermal-coupling-title">
                   <h4 id="optothermal-coupling-title">Optical → thermal coupling</h4>
@@ -443,6 +451,10 @@ export function App() {
                 </section>
               </ScientificResultsLayout>
             )}
+        </section>
+        <section id="studies-view" aria-labelledby="studies-title" hidden={activeView !== "studies"}>
+          <Studies config={config} result={result} lastRunConfig={lastRunConfig} blocked={runBlocked} simulationBusy={busy} resultStale={resultIsStale} stopRef={studyStopRef}
+            onBusyChange={setStudyBusy} onConvergence={setConvergence} onLoadConfiguration={restoreConfiguration} />
         </section>
         <section id="validation-view" aria-labelledby="validation-title" hidden={activeView !== "validation"}>
             <ScientificStageHeader
@@ -464,6 +476,7 @@ export function App() {
                     "Gaussian beam evaluated at a single fixed axial position.",
                     "Isotropic, temperature-independent thermal properties.",
                     "One optical film layer and a finite glass substrate with ambient outer boundaries.",
+                    "Uniform absorbed power through the film; effective phase driven by thickness-averaged temperature.",
                   ]}
                   limits={[
                     "No Z-scan propagation or detector-plane observable is calculated.",
@@ -480,8 +493,9 @@ export function App() {
                     status={modified ? { state: "modified", label: "Inputs changed after run" } : { state: "up-to-date", label: "Manifest current" }}
                     items={[
                       { id: "engine", label: "Engine", value: result.engine },
-                      { id: "model", label: "Model", value: "axisymmetric-rz-local-tmm-thermal@0.2" },
-                      { id: "mesh", label: "Mesh", value: `${lastRunConfig.radialCells} × ${lastRunConfig.substrateCells + 1} cells; ${lastRunConfig.timeSteps} time samples` },
+                      { id: "model", label: "Model", value: "axisymmetric-rz-local-tmm-thermal@0.3" },
+                      { id: "mesh", label: "Mesh", value: `${lastRunConfig.radialCells} × ${lastRunConfig.substrateCells + lastRunConfig.filmCells} cells; ${lastRunConfig.timeSteps} time samples` },
+                      { id: "depth-grid", label: "Depth mesh", value: `${lastRunConfig.filmCells} film cells; ${lastRunConfig.substrateCells} substrate cells; exponential grading ${lastRunConfig.substrateGrading}` },
                       { id: "timestep", label: "Time step", value: `${result.metrics.timeStepNs.toPrecision(5)} ns` },
                       { id: "iterations", label: "Mean implicit iterations", value: result.metrics.averageLinearIterations.toFixed(2) },
                       { id: "worst-residual", label: "Worst linear residual", value: `${result.metrics.worstLinearResidual.toExponential(4)} at step ${result.metrics.worstLinearStep}` },

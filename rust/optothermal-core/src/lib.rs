@@ -1,6 +1,6 @@
 use std::{mem, slice};
 
-const CONFIG_LENGTH: usize = 30;
+const CONFIG_LENGTH: usize = 32;
 const HEADER_LENGTH: usize = 29;
 const MAX_CELLS: usize = 40_000;
 const MAX_OUTPUT_VALUES: usize = 100_000;
@@ -67,6 +67,8 @@ struct Config {
     time_steps: usize,
     radial_cells: usize,
     substrate_cells: usize,
+    film_cells: usize,
+    substrate_grading: f64,
     radius_m: f64,
     film_thickness_m: f64,
     substrate_depth_m: f64,
@@ -87,14 +89,19 @@ struct Config {
 impl Config {
     fn parse(values: &[f64]) -> Result<Self, i32> {
         if values.len() != CONFIG_LENGTH || values.iter().any(|value| !value.is_finite()) { return Err(2); }
-        if [5usize, 6, 7].iter().any(|index| values[*index].fract() != 0.0) { return Err(3); }
+        if [5usize, 6, 7, 29].iter().any(|index| values[*index].fract() != 0.0) { return Err(3); }
         let time_steps = values[5] as usize;
         let radial_cells = values[6] as usize;
         let substrate_cells = values[7] as usize;
+        let film_cells = values[29] as usize;
+        let substrate_grading = values[30];
         if !(24..=1200).contains(&time_steps)
             || !(17..=257).contains(&radial_cells)
             || !(4..=128).contains(&substrate_cells)
-            || radial_cells.saturating_mul(substrate_cells + 1) > MAX_CELLS
+            || !(1..=64).contains(&film_cells)
+            || !(0.0..=8.0).contains(&substrate_grading)
+            || values[31] != 0.0
+            || radial_cells.saturating_mul(substrate_cells.saturating_add(film_cells)) > MAX_CELLS
         { return Err(3); }
         let positive = [0usize, 1, 2, 3, 4, 8, 9, 10, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 25, 26, 27];
         if positive.iter().any(|index| values[*index] <= 0.0) || values[28] < 0.0 { return Err(4); }
@@ -141,6 +148,8 @@ impl Config {
             time_steps,
             radial_cells,
             substrate_cells,
+            film_cells,
+            substrate_grading,
             radius_m,
             film_thickness_m,
             substrate_depth_m,
@@ -160,6 +169,47 @@ impl Config {
     }
 }
 
+struct ThermalMesh {
+    /// Cell thicknesses in the same bottom-to-surface order as the output maps.
+    thickness: Vec<f64>,
+    /// Cell-center z coordinates in metres, increasing from the substrate bottom to the film surface.
+    centers: Vec<f64>,
+}
+
+fn build_mesh(config: &Config) -> ThermalMesh {
+    let substrate_cells = config.substrate_cells;
+    let mut thickness = Vec::with_capacity(substrate_cells + config.film_cells);
+    let mut centers = Vec::with_capacity(substrate_cells + config.film_cells);
+
+    // The grading coordinate is measured downwards from the interface.  Reverse
+    // the resulting cells so the exported maps remain ordered from bottom to top.
+    let boundary = |j: usize| {
+        let fraction = j as f64 / substrate_cells as f64;
+        let distance_fraction = if config.substrate_grading == 0.0 {
+            fraction
+        } else {
+            (config.substrate_grading * fraction).exp_m1()
+                / config.substrate_grading.exp_m1()
+        };
+        -config.substrate_depth_m * distance_fraction
+    };
+    for layer in 0..substrate_cells {
+        let bottom_index = substrate_cells - layer;
+        let lower = boundary(bottom_index);
+        let upper = boundary(bottom_index - 1);
+        thickness.push(upper - lower);
+        centers.push(0.5 * (lower + upper));
+    }
+
+    let film_dz = config.film_thickness_m / config.film_cells as f64;
+    for layer in 0..config.film_cells {
+        thickness.push(film_dz);
+        centers.push((layer as f64 + 0.5) * film_dz);
+    }
+
+    ThermalMesh { thickness, centers }
+}
+
 #[no_mangle]
 pub extern "C" fn allocate_f64(length: usize) -> *mut f64 {
     if length == 0 || length > MAX_OUTPUT_VALUES { return std::ptr::null_mut(); }
@@ -175,13 +225,19 @@ pub unsafe extern "C" fn deallocate_f64(pointer: *mut f64, capacity: usize) {
 }
 
 #[no_mangle]
-pub extern "C" fn output_length(time_steps: usize, radial_cells: usize, substrate_cells: usize) -> usize {
+pub extern "C" fn output_length(
+    time_steps: usize,
+    radial_cells: usize,
+    substrate_cells: usize,
+    film_cells: usize,
+) -> usize {
     if !(24..=1200).contains(&time_steps)
         || !(17..=257).contains(&radial_cells)
         || !(4..=128).contains(&substrate_cells)
-        || radial_cells.saturating_mul(substrate_cells.saturating_add(1)) > MAX_CELLS
+        || !(1..=64).contains(&film_cells)
+        || radial_cells.saturating_mul(substrate_cells.saturating_add(film_cells)) > MAX_CELLS
     { return 0; }
-    let nz = substrate_cells + 1;
+    let nz = substrate_cells + film_cells;
     let Some(time_values) = 4usize.checked_mul(time_steps) else { return 0; };
     let Some(radial_values) = 3usize.checked_mul(radial_cells) else { return 0; };
     let Some(cell_count) = nz.checked_mul(radial_cells) else { return 0; };
@@ -205,24 +261,29 @@ pub unsafe extern "C" fn run_simulation(
     if config_length != CONFIG_LENGTH { return 2; }
     let values = slice::from_raw_parts(config_pointer, config_length);
     let config = match Config::parse(values) { Ok(config) => config, Err(code) => return code };
-    let required = output_length(config.time_steps, config.radial_cells, config.substrate_cells);
+    let required = output_length(
+        config.time_steps,
+        config.radial_cells,
+        config.substrate_cells,
+        config.film_cells,
+    );
     if output_capacity < required { return 5; }
     let output = slice::from_raw_parts_mut(output_pointer, required);
     output.fill(f64::NAN);
-    output[0] = 2.0;
+    output[0] = 3.0;
     output[1] = config.time_steps as f64;
     output[2] = config.radial_cells as f64;
-    output[3] = (config.substrate_cells + 1) as f64;
+    output[3] = (config.substrate_cells + config.film_cells) as f64;
     match simulate(&config, output) { Ok(()) => 0, Err(code) => code }
 }
 
 fn simulate(config: &Config, output: &mut [f64]) -> Result<(), i32> {
     let nt = config.time_steps;
     let nr = config.radial_cells;
-    let nz = config.substrate_cells + 1;
+    let mesh = build_mesh(config);
+    let nz = mesh.thickness.len();
     let cell_count = nr * nz;
     let dr = config.radius_m / (nr - 1) as f64;
-    let substrate_dz = config.substrate_depth_m / config.substrate_cells as f64;
     let dt = config.duration_s / (nt - 1) as f64;
     let pulse_center = 3.0 * config.pulse_fwhm_s;
 
@@ -246,10 +307,9 @@ fn simulate(config: &Config, output: &mut [f64]) -> Result<(), i32> {
     let peak_map_offset = cursor;
 
     for i in 0..nr { output[radial_offset + i] = i as f64 * dr * 1.0e6; }
-    for layer in 0..config.substrate_cells {
-        output[depth_offset + layer] = -config.substrate_depth_m * 1.0e6 + (layer as f64 + 0.5) * substrate_dz * 1.0e6;
+    for layer in 0..nz {
+        output[depth_offset + layer] = mesh.centers[layer] * 1.0e6;
     }
-    output[depth_offset + nz - 1] = 0.5 * config.film_thickness_m * 1.0e6;
 
     let baseline_optical_power = thin_film_power(config, config.insulating_index);
     if !optical_power_is_valid(baseline_optical_power) { return Err(7); }
@@ -298,7 +358,7 @@ fn simulate(config: &Config, output: &mut [f64]) -> Result<(), i32> {
         }
 
         current.copy_from_slice(&previous);
-        let linear_report = implicit_step(config, &previous, &mut current, &source, dt, dr, substrate_dz);
+        let linear_report = implicit_step(config, &mesh, &previous, &mut current, &source, dt, dr);
         total_iterations += linear_report.iterations;
         maximum_linear_iterations = maximum_linear_iterations.max(linear_report.iterations);
         if linear_report.residual_norm >= worst_linear_residual {
@@ -311,15 +371,18 @@ fn simulate(config: &Config, output: &mut [f64]) -> Result<(), i32> {
         if !linear_report.converged { return Err(6); }
 
         for i in 0..nr {
-            let index = (nz - 1) * nr + i;
-            let absolute_temperature = config.ambient_k + current[index];
+            // The optical model remains a homogeneous-film approximation.  Its
+            // phase is driven by the film-thickness average, while traces/maps
+            // continue to expose the top (surface) film cell.
+            let absolute_temperature = config.ambient_k
+                + film_mean_temperature_rise(config, &mesh, &current, i, nr);
             let heating = absolute_temperature >= previous_film_temperature[i];
             let center = if heating { config.transition_heating_k } else { config.transition_cooling_k };
             let equilibrium = 0.5 * (1.0 + ((absolute_temperature - center) / config.transition_width_k).tanh());
             let response = 1.0 - (-dt / config.phase_relaxation_s).exp();
             phase[i] = (phase[i] + response * (equilibrium - phase[i])).clamp(0.0, 1.0);
             previous_film_temperature[i] = absolute_temperature;
-            radial_peak[i] = radial_peak[i].max(absolute_temperature);
+            radial_peak[i] = radial_peak[i].max(config.ambient_k + current[(nz - 1) * nr + i]);
             maximum_phase = maximum_phase.max(phase[i]);
         }
 
@@ -329,7 +392,7 @@ fn simulate(config: &Config, output: &mut [f64]) -> Result<(), i32> {
             maximum_time = time;
         }
         for index in 0..cell_count { peak[index] = peak[index].max(current[index]); }
-        let stored_energy_j = stored_energy(config, &current, dr, substrate_dz);
+        let stored_energy_j = stored_energy(config, &mesh, &current, dr);
         if !stored_energy_j.is_finite() || stored_energy_j < -NEGATIVE_ENERGY_TOLERANCE_J { return Err(8); }
         minimum_stored_energy = minimum_stored_energy.min(stored_energy_j);
         maximum_stored_energy = maximum_stored_energy.max(stored_energy_j);
@@ -404,36 +467,53 @@ fn write_linear_diagnostics(
 
 fn implicit_step(
     config: &Config,
+    mesh: &ThermalMesh,
     previous: &[f64],
     current: &mut [f64],
     film_source: &[f64],
     dt: f64,
     dr: f64,
-    substrate_dz: f64,
 ) -> LinearSolveReport {
-    let nr = config.radial_cells;
-    let nz = config.substrate_cells + 1;
+    let nz = mesh.thickness.len();
+    let mut lower = vec![0.0; nz];
+    let mut diagonal = vec![0.0; nz];
+    let mut upper = vec![0.0; nz];
+    let mut right_hand_side = vec![0.0; nz];
+    let mut solution = vec![0.0; nz];
     let mut final_update_k = f64::INFINITY;
     let mut final_residual_norm = f64::INFINITY;
     for iteration in 0..MAX_LINEAR_ITERATIONS {
         let mut maximum_change: f64 = 0.0;
-        for layer in 0..nz {
-            for i in 0..nr {
-                let index = layer * nr + i;
-                if i == nr - 1 {
-                    maximum_change = maximum_change.max(current[index].abs());
-                    current[index] = 0.0;
-                    continue;
-                }
-                let (diagonal_rate, neighbour_rate, source_rate) = cell_rates(
-                    config, current, film_source, layer, i, dr, substrate_dz,
-                );
-                let next = (previous[index] + dt * (source_rate + neighbour_rate)) / (1.0 + dt * diagonal_rate);
-                maximum_change = maximum_change.max((next - current[index]).abs());
-                current[index] = next;
-            }
+        // A symmetric line Gauss–Seidel sweep makes each radial line an
+        // exact Thomas solve in depth.  The reverse sweep matters for highly
+        // graded substrate meshes because it propagates information from both
+        // radial ends during every iteration.
+        for reverse in [false, true] {
+            let Some(sweep_change) = sweep_radial_lines(
+                config,
+                mesh,
+                previous,
+                current,
+                film_source,
+                dt,
+                dr,
+                reverse,
+                &mut lower,
+                &mut diagonal,
+                &mut upper,
+                &mut right_hand_side,
+                &mut solution,
+            ) else {
+                return LinearSolveReport {
+                    converged: false,
+                    iterations: iteration + 1,
+                    maximum_update_k: f64::MAX,
+                    residual_norm: f64::MAX,
+                };
+            };
+            maximum_change = maximum_change.max(sweep_change);
         }
-        let residual_norm = linear_residual_norm(config, previous, current, film_source, dt, dr, substrate_dz);
+        let residual_norm = linear_residual_norm(config, mesh, previous, current, film_source, dt, dr);
         final_update_k = maximum_change;
         final_residual_norm = residual_norm;
         if maximum_change <= LINEAR_UPDATE_TOLERANCE_K && residual_norm <= LINEAR_RESIDUAL_TOLERANCE {
@@ -453,70 +533,205 @@ fn implicit_step(
     }
 }
 
-fn cell_rates(
+fn sweep_radial_lines(
     config: &Config,
-    current: &[f64],
+    mesh: &ThermalMesh,
+    previous: &[f64],
+    current: &mut [f64],
     film_source: &[f64],
-    layer: usize,
-    i: usize,
+    dt: f64,
     dr: f64,
-    substrate_dz: f64,
-) -> (f64, f64, f64) {
+    reverse: bool,
+    lower: &mut [f64],
+    diagonal: &mut [f64],
+    upper: &mut [f64],
+    right_hand_side: &mut [f64],
+    solution: &mut [f64],
+) -> Option<f64> {
+    let range = 0..(config.radial_cells - 1);
+    let mut maximum_change: f64 = 0.0;
+    if reverse {
+        for i in range.rev() {
+            maximum_change = maximum_change.max(solve_depth_line(
+                config,
+                mesh,
+                previous,
+                current,
+                film_source,
+                dt,
+                dr,
+                i,
+                lower,
+                diagonal,
+                upper,
+                right_hand_side,
+                solution,
+            )?);
+        }
+    } else {
+        for i in range {
+            maximum_change = maximum_change.max(solve_depth_line(
+                config,
+                mesh,
+                previous,
+                current,
+                film_source,
+                dt,
+                dr,
+                i,
+                lower,
+                diagonal,
+                upper,
+                right_hand_side,
+                solution,
+            )?);
+        }
+    }
+    Some(maximum_change)
+}
+
+fn solve_depth_line(
+    config: &Config,
+    mesh: &ThermalMesh,
+    previous: &[f64],
+    current: &mut [f64],
+    film_source: &[f64],
+    dt: f64,
+    dr: f64,
+    i: usize,
+    lower: &mut [f64],
+    diagonal: &mut [f64],
+    upper: &mut [f64],
+    right_hand_side: &mut [f64],
+    solution: &mut [f64],
+) -> Option<f64> {
     let nr = config.radial_cells;
-    let nz = config.substrate_cells + 1;
-    let index = layer * nr + i;
-    let material = if layer == nz - 1 { config.film } else { config.substrate };
-    let dz = if layer == nz - 1 { config.film_thickness_m } else { substrate_dz };
+    let nz = mesh.thickness.len();
+    debug_assert!(i < nr - 1);
+
+    for layer in 0..nz {
+        let material = material_for_layer(config, layer);
+        let (radial_left, radial_right, radial_diagonal) = radial_rates(material, i, dr);
+        let (down, up, boundary) = vertical_rates(config, mesh, layer);
+        let index = layer * nr + i;
+        let source_rate = if layer >= config.substrate_cells {
+            film_source[i] / material.volumetric_heat_capacity
+        } else {
+            0.0
+        };
+        lower[layer] = -dt * down;
+        diagonal[layer] = 1.0 + dt * (radial_diagonal + down + up + boundary);
+        upper[layer] = -dt * up;
+        let mut rhs = previous[index] + dt * source_rate;
+        if i > 0 {
+            rhs += dt * radial_left * current[index - 1];
+        }
+        // The last radial node is a fixed ambient boundary with zero source
+        // and storage, so its value is zero and contributes nothing to rhs.
+        if i + 1 < nr - 1 {
+            rhs += dt * radial_right * current[index + 1];
+        }
+        right_hand_side[layer] = rhs;
+    }
+
+    for layer in 1..nz {
+        let pivot = diagonal[layer - 1];
+        if !pivot.is_finite() || pivot <= 0.0 {
+            return None;
+        }
+        let factor = lower[layer] / pivot;
+        diagonal[layer] -= factor * upper[layer - 1];
+        right_hand_side[layer] -= factor * right_hand_side[layer - 1];
+    }
+    let last = nz - 1;
+    if !diagonal[last].is_finite() || diagonal[last] <= 0.0 {
+        return None;
+    }
+    solution[last] = right_hand_side[last] / diagonal[last];
+    for layer in (0..last).rev() {
+        solution[layer] = (right_hand_side[layer] - upper[layer] * solution[layer + 1]) / diagonal[layer];
+    }
+    if solution.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
+
+    let mut maximum_change: f64 = 0.0;
+    for layer in 0..nz {
+        let index = layer * nr + i;
+        maximum_change = maximum_change.max((solution[layer] - current[index]).abs());
+        // This assignment is deliberately after the complete Thomas solve so
+        // the radial line update is atomic from the neighbouring-line view.
+    }
+    for layer in 0..nz {
+        current[layer * nr + i] = solution[layer];
+    }
+    Some(maximum_change)
+}
+
+fn material_for_layer(config: &Config, layer: usize) -> Material {
+    if layer < config.substrate_cells { config.substrate } else { config.film }
+}
+
+fn radial_rates(material: Material, i: usize, dr: f64) -> (f64, f64, f64) {
     let alpha = material.conductivity / material.volumetric_heat_capacity;
-    let mut diagonal_rate = 0.0;
-    let mut neighbour_rate = 0.0;
     if i == 0 {
-        let coefficient = 4.0 * alpha / (dr * dr);
-        diagonal_rate += coefficient;
-        neighbour_rate += coefficient * current[index + 1];
+        let right = 4.0 * alpha / (dr * dr);
+        (0.0, right, right)
     } else {
         let radius = i as f64 * dr;
-        let minus = alpha * (1.0 / (dr * dr) - 1.0 / (2.0 * radius * dr));
-        let plus = alpha * (1.0 / (dr * dr) + 1.0 / (2.0 * radius * dr));
-        diagonal_rate += minus + plus;
-        neighbour_rate += minus * current[index - 1];
-        if i < nr - 1 { neighbour_rate += plus * current[index + 1]; }
+        let left = alpha * (1.0 / (dr * dr) - 1.0 / (2.0 * radius * dr));
+        let right = alpha * (1.0 / (dr * dr) + 1.0 / (2.0 * radius * dr));
+        (left, right, left + right)
     }
-    if layer > 0 {
-        let below_material = if layer - 1 == nz - 1 { config.film } else { config.substrate };
-        let below_dz = if layer - 1 == nz - 1 { config.film_thickness_m } else { substrate_dz };
-        let conductance = interface_conductance(material.conductivity, dz, below_material.conductivity, below_dz);
-        let coefficient = conductance / (material.volumetric_heat_capacity * dz);
-        diagonal_rate += coefficient;
-        neighbour_rate += coefficient * current[index - nr];
+}
+
+fn vertical_rates(config: &Config, mesh: &ThermalMesh, layer: usize) -> (f64, f64, f64) {
+    let nz = mesh.thickness.len();
+    let material = material_for_layer(config, layer);
+    let dz = mesh.thickness[layer];
+    let capacity = material.volumetric_heat_capacity;
+    let mut down = 0.0;
+    let mut up = 0.0;
+    let mut boundary = 0.0;
+    if layer == 0 {
+        // Fixed ambient at the substrate bottom, one half-cell away.
+        boundary += 2.0 * material.conductivity / (capacity * dz * dz);
     } else {
-        diagonal_rate += 2.0 * material.conductivity / (material.volumetric_heat_capacity * dz * dz);
+        let below = material_for_layer(config, layer - 1);
+        let conductance = interface_conductance(
+            material.conductivity,
+            dz,
+            below.conductivity,
+            mesh.thickness[layer - 1],
+        );
+        down = conductance / (capacity * dz);
     }
-    if layer + 1 < nz {
-        let above_material = if layer + 1 == nz - 1 { config.film } else { config.substrate };
-        let above_dz = if layer + 1 == nz - 1 { config.film_thickness_m } else { substrate_dz };
-        let conductance = interface_conductance(material.conductivity, dz, above_material.conductivity, above_dz);
-        let coefficient = conductance / (material.volumetric_heat_capacity * dz);
-        diagonal_rate += coefficient;
-        neighbour_rate += coefficient * current[index + nr];
+    if layer + 1 == nz {
+        boundary += config.h_air_w_m2k / (capacity * dz);
     } else {
-        diagonal_rate += config.h_air_w_m2k / (material.volumetric_heat_capacity * dz);
+        let above = material_for_layer(config, layer + 1);
+        let conductance = interface_conductance(
+            material.conductivity,
+            dz,
+            above.conductivity,
+            mesh.thickness[layer + 1],
+        );
+        up = conductance / (capacity * dz);
     }
-    let source_rate = if layer == nz - 1 { film_source[i] / material.volumetric_heat_capacity } else { 0.0 };
-    (diagonal_rate, neighbour_rate, source_rate)
+    (down, up, boundary)
 }
 
 fn linear_residual_norm(
     config: &Config,
+    mesh: &ThermalMesh,
     previous: &[f64],
     current: &[f64],
     film_source: &[f64],
     dt: f64,
     dr: f64,
-    substrate_dz: f64,
 ) -> f64 {
     let nr = config.radial_cells;
-    let nz = config.substrate_cells + 1;
+    let nz = mesh.thickness.len();
     let mut maximum_scaled_residual: f64 = 0.0;
     for layer in 0..nz {
         for i in 0..nr {
@@ -525,11 +740,28 @@ fn linear_residual_norm(
                 maximum_scaled_residual = maximum_scaled_residual.max(current[index].abs());
                 continue;
             }
-            let (diagonal_rate, neighbour_rate, source_rate) = cell_rates(
-                config, current, film_source, layer, i, dr, substrate_dz,
-            );
-            let left = (1.0 + dt * diagonal_rate) * current[index];
-            let right = previous[index] + dt * (source_rate + neighbour_rate);
+            let material = material_for_layer(config, layer);
+            let (radial_left, radial_right, radial_diagonal) = radial_rates(material, i, dr);
+            let (down, up, boundary) = vertical_rates(config, mesh, layer);
+            let source_rate = if layer >= config.substrate_cells {
+                film_source[i] / material.volumetric_heat_capacity
+            } else {
+                0.0
+            };
+            let left = (1.0 + dt * (radial_diagonal + down + up + boundary)) * current[index];
+            let mut right = previous[index] + dt * source_rate;
+            if i > 0 {
+                right += dt * radial_left * current[index - 1];
+            }
+            if i + 1 < nr - 1 {
+                right += dt * radial_right * current[index + 1];
+            }
+            if layer > 0 {
+                right += dt * down * current[index - nr];
+            }
+            if layer + 1 < nz {
+                right += dt * up * current[index + nr];
+            }
             let scale = left.abs().max(right.abs()).max(1.0);
             maximum_scaled_residual = maximum_scaled_residual.max((left - right).abs() / scale);
         }
@@ -589,17 +821,106 @@ fn optical_power_is_valid(power: OpticalPower) -> bool {
         && power.absorptance_raw <= 1.0 + OPTICAL_POWER_TOLERANCE
 }
 
-fn stored_energy(config: &Config, temperature_rise: &[f64], dr: f64, substrate_dz: f64) -> f64 {
+fn film_mean_temperature_rise(
+    config: &Config,
+    mesh: &ThermalMesh,
+    temperature_rise: &[f64],
+    radial_index: usize,
+    radial_cells: usize,
+) -> f64 {
+    let mut weighted_sum = 0.0;
+    let film_start = config.substrate_cells;
+    for layer in film_start..mesh.thickness.len() {
+        weighted_sum += temperature_rise[layer * radial_cells + radial_index] * mesh.thickness[layer];
+    }
+    weighted_sum / config.film_thickness_m
+}
+
+fn stored_energy(config: &Config, mesh: &ThermalMesh, temperature_rise: &[f64], dr: f64) -> f64 {
     let nr = config.radial_cells;
-    let nz = config.substrate_cells + 1;
+    let nz = mesh.thickness.len();
     let mut energy = 0.0;
     for layer in 0..nz {
-        let material = if layer == nz - 1 { config.film } else { config.substrate };
-        let dz = if layer == nz - 1 { config.film_thickness_m } else { substrate_dz };
+        let material = material_for_layer(config, layer);
+        let dz = mesh.thickness[layer];
         for i in 0..nr {
             let area = radial_annulus_area(i, nr, dr);
             energy += material.volumetric_heat_capacity * temperature_rise[layer * nr + i] * area * dz;
         }
     }
     energy
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(substrate_cells: f64, film_cells: f64, grading: f64) -> Config {
+        let values = [
+            1.064, 12.0, 0.01, 1.0, 12.0, 24.0, 17.0, substrate_cells,
+            60.0, 150.0, 20.0, 25.0, 1.46, 1.0, 2.79, 0.45, 1.45, 1.41,
+            68.85, 62.85, 2.0, 1.0, 4570.0, 690.0, 3.6, 2230.0, 830.0,
+            1.2, 5.0, film_cells, grading, 0.0,
+        ];
+        Config::parse(&values).expect("test configuration should be valid")
+    }
+
+    #[test]
+    fn legacy_single_film_uniform_mesh_is_unchanged() {
+        let config = config(4.0, 1.0, 0.0);
+        let mesh = build_mesh(&config);
+        assert_eq!(mesh.thickness.len(), 5);
+        for thickness in &mesh.thickness[..4] {
+            assert!((*thickness - 5.0e-6).abs() < 1.0e-18);
+        }
+        assert!((mesh.centers[0] + 17.5e-6).abs() < 1.0e-18);
+        assert!((mesh.centers[3] + 2.5e-6).abs() < 1.0e-18);
+        assert!((mesh.centers[4] - 75.0e-9).abs() < 1.0e-18);
+        assert!(mesh.centers.windows(2).all(|pair| pair[1] > pair[0]));
+    }
+
+    #[test]
+    fn exponential_grading_refines_the_interface() {
+        let config = config(96.0, 24.0, 6.0);
+        let mesh = build_mesh(&config);
+        let interface_cell = config.substrate_cells - 1;
+        assert!(mesh.thickness[interface_cell] < mesh.thickness[0]);
+        assert!(mesh.centers.windows(2).all(|pair| pair[1] > pair[0]));
+        let substrate_thickness: f64 = mesh.thickness[..config.substrate_cells].iter().sum();
+        assert!((substrate_thickness - config.substrate_depth_m).abs() < 1.0e-18);
+        let film_thickness: f64 = mesh.thickness[config.substrate_cells..].iter().sum();
+        assert!((film_thickness - config.film_thickness_m).abs() < 1.0e-18);
+    }
+
+    #[test]
+    fn line_solver_runs_a_small_legacy_case() {
+        let config = config(4.0, 1.0, 0.0);
+        let length = output_length(config.time_steps, config.radial_cells, config.substrate_cells, config.film_cells);
+        let mut output = vec![f64::NAN; length];
+        output[0] = 3.0;
+        output[1] = config.time_steps as f64;
+        output[2] = config.radial_cells as f64;
+        output[3] = (config.substrate_cells + config.film_cells) as f64;
+        simulate(&config, &mut output).expect("small line solve should converge");
+        assert!(output.iter().all(|value| value.is_finite()));
+        assert_eq!(output[0], 3.0);
+        assert_eq!(output[3], 5.0);
+        assert_eq!(output[16], 1.0);
+    }
+
+    #[test]
+    fn line_solver_runs_a_graded_multilayer_case() {
+        let config = config(16.0, 8.0, 6.0);
+        let length = output_length(config.time_steps, config.radial_cells, config.substrate_cells, config.film_cells);
+        let mut output = vec![f64::NAN; length];
+        output[0] = 3.0;
+        output[1] = config.time_steps as f64;
+        output[2] = config.radial_cells as f64;
+        output[3] = (config.substrate_cells + config.film_cells) as f64;
+        simulate(&config, &mut output).expect("graded multilayer solve should converge");
+        assert!(output.iter().all(|value| value.is_finite()));
+        assert_eq!(output[3], 24.0);
+        assert_eq!(output[16], 1.0);
+    }
+
 }

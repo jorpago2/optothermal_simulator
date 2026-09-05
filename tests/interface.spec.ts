@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 
 const viewports = [
   { name: "small-mobile", width: 320, height: 720 },
@@ -96,7 +96,7 @@ test("run overview presents the experiment visually and updates with the configu
     "Radial boundary",
     "Gaussian source resolution",
     "Substrate diffusion resolution",
-    "Film control volume",
+    "Film depth resolution",
     "Browser mesh",
   ]);
   const rows = await cards.evaluateAll((elements) => elements.map((element) => Math.round(element.getBoundingClientRect().top)));
@@ -152,10 +152,9 @@ test("reference simulation produces plots, validation evidence and export", asyn
   await expect(page.getByRole("heading", { name: "Optothermal pulse completed" })).toBeVisible();
   await expect(page.getByText("Quantitative result is provisional", { exact: true })).toBeVisible();
   const resultsView = page.getByRole("region", { name: "Fixed-position response" });
-  await expect(resultsView.getByText(/0\.04 cells/)).toBeVisible();
-  await expect(resultsView.getByText(/film is represented by one control volume/)).toBeVisible();
-  await expect(page.locator(".plot-surface")).toHaveCount(4);
-  await expect(page.locator(".plot-data-summary")).toHaveCount(4);
+  await expect(resultsView.getByText(/Resolution checks alone do not establish quantitative convergence/)).toBeVisible();
+  await expect(page.locator(".plot-surface")).toHaveCount(5);
+  await expect(page.locator(".plot-data-summary")).toHaveCount(5);
   await page.locator(".plot-data-summary summary").first().click();
   await expect(page.locator(".plot-data-summary").first()).toContainText("Temperature range");
   await expect(page.locator(".plot-column")).toHaveCount(2);
@@ -174,6 +173,53 @@ test("reference simulation produces plots, validation evidence and export", asyn
   await expect(page.getByRole("button", { name: "Optical passivity: Passed" })).toBeVisible();
   await page.screenshot({ path: "tests/artifacts/desktop-validation.png", fullPage: true });
 });
+
+for (const width of [375, 1440]) {
+  test(`mesh controls validate, persist and reach the exported solver result at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await gotoAndContinue(page, "./");
+    await page.getByRole("button", { name: "Numerical mesh", exact: true }).click();
+    const film = page.getByRole("textbox", { name: "VO₂ thickness cells", exact: true });
+    await film.fill("3.5");
+    await film.press("Tab");
+    await expect(page.getByRole("button", { name: "Run", exact: true })).toBeDisabled();
+    await expect(page.getByText("Film cells must be an integer between 1 and 64.").first()).toBeVisible();
+    await film.fill("12");
+    await film.press("Tab");
+    const substrate = page.getByRole("textbox", { name: "Substrate depth cells", exact: true });
+    await substrate.fill("64");
+    await substrate.press("Tab");
+    const grading = page.getByRole("textbox", { name: "Substrate grading", exact: true });
+    await grading.fill("0");
+    await grading.press("Tab");
+    await expect(page.getByLabel("Mesh spacing summary")).toContainText("313 nm");
+    await grading.fill("6");
+    await grading.press("Tab");
+    await expect(page.getByLabel("Mesh spacing summary")).toContainText("12.5 nm");
+    await page.getByLabel("Mesh spacing summary").scrollIntoViewIfNeeded();
+    await expectAccessible(page);
+    await page.screenshot({ path: `tests/artifacts/mesh-${width}.png` });
+    await expect(page.getByRole("button", { name: "Run", exact: true })).toBeEnabled();
+    await page.getByRole("button", { name: "Run", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Optothermal pulse completed" })).toBeVisible();
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export result", exact: true }).click();
+    const download = await downloadPromise;
+    const payload = JSON.parse(await readFile((await download.path())!, "utf8"));
+    expect(payload.schema).toBe("optothermal-simulator/result@3");
+    expect(payload.config).toMatchObject({ filmCells: 12, substrateCells: 64, substrateGrading: 6 });
+    expect(payload.result.depthUm).toHaveLength(76);
+    expect(payload.result.depthEdgesUm).toHaveLength(77);
+    expect(payload.result.depthEdgesUm[64]).toBe(0);
+    expect(payload.interpretation.quantitativeUse).toBe("provisional");
+    await gotoAndContinue(page, "./");
+    await page.getByRole("button", { name: "Restore session", exact: true }).click();
+    await page.getByRole("button", { name: "Numerical mesh", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "VO₂ thickness cells", exact: true })).toHaveValue("12");
+    await expect(page.getByRole("textbox", { name: "Substrate depth cells", exact: true })).toHaveValue("64");
+    await expect(page.getByRole("textbox", { name: "Substrate grading", exact: true })).toHaveValue("6");
+  });
+}
 
 test("React owns result freshness, export feedback and stable plot mounting", async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 900 });
@@ -196,11 +242,11 @@ test("React owns result freshness, export feedback and stable plot mounting", as
   await page.getByRole("button", { name: "Results", exact: true }).click();
   await expect(page.getByLabel("Optothermal pulse completed").getByText("Result is stale", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Export result" })).toBeDisabled();
-  await expect(page.locator(".js-plotly-plot")).toHaveCount(4);
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(5);
 
   await page.getByRole("button", { name: "Validation", exact: true }).click();
   await page.getByRole("button", { name: "Results", exact: true }).click();
-  await expect(page.locator(".js-plotly-plot")).toHaveCount(4);
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(5);
 
   await page.getByRole("button", { name: "Use dark theme" }).click();
   await expect(page.getByRole("button", { name: "Use light theme" })).toBeVisible();
@@ -236,7 +282,7 @@ test("all result panels remain reachable on a narrow mobile stage", async ({ pag
   await gotoAndContinue(page, "./");
   await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Optothermal pulse completed" })).toBeVisible();
-  await expect(page.locator(".plot-surface")).toHaveCount(4);
+  await expect(page.locator(".plot-surface")).toHaveCount(5);
 
   const stage = page.locator(".scientific-workbench__stage");
   const stageBounds = await stage.boundingBox();
@@ -300,7 +346,7 @@ test("plot controls stay outside the scientific data region", async ({ page }) =
   const toolbar = firstFrame.getByRole("toolbar", { name: "Plot controls" });
   const plot = firstFrame.locator(".scientific-plot-surface");
   await expect(page.locator(".scientific-plot-surface[role=img]")).toHaveCount(0);
-  await expect(page.locator(".scientific-plot-surface[role=group]")).toHaveCount(4);
+  await expect(page.locator(".scientific-plot-surface[role=group]")).toHaveCount(5);
   await expect(toolbarHost).toBeVisible();
   await expect(toolbar).toBeVisible();
 
@@ -379,12 +425,12 @@ test("plots fit the viewport after reopening Results at a narrower size", async 
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoAndContinue(page, "./");
   await page.getByRole("button", { name: "Run", exact: true }).click();
-  await expect(page.locator(".js-plotly-plot")).toHaveCount(4);
+  await expect(page.locator(".js-plotly-plot")).toHaveCount(5);
 
   await page.getByRole("button", { name: "Configure", exact: true }).click();
   await page.setViewportSize({ width: 375, height: 812 });
   await page.getByRole("button", { name: "Results", exact: true }).click();
-  await expect(page.locator(".plot-surface")).toHaveCount(4);
+  await expect(page.locator(".plot-surface")).toHaveCount(5);
   await page.waitForTimeout(200);
 
   const dimensions = await page.locator(".plot-surface").evaluateAll((surfaces) => surfaces.map((surface) => {

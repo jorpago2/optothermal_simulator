@@ -7,7 +7,7 @@ import { validateConfig } from "./validation";
 interface RawCoreExports extends WebAssembly.Exports {
   allocate_f64(length: number): number;
   deallocate_f64(pointer: number, capacity: number): void;
-  output_length(timeSteps: number, radialCells: number, substrateCells: number): number;
+  output_length(timeSteps: number, radialCells: number, substrateCells: number, filmCells: number): number;
   run_simulation(configPointer: number, configLength: number, outputPointer: number, outputCapacity: number): number;
   memory: WebAssembly.Memory;
 }
@@ -25,6 +25,7 @@ async function runRaw(config: typeof VO2_REFERENCE_CONFIG): Promise<number> {
     VO2_REFERENCE_CONFIG.timeSteps,
     VO2_REFERENCE_CONFIG.radialCells,
     VO2_REFERENCE_CONFIG.substrateCells,
+    VO2_REFERENCE_CONFIG.filmCells,
   );
   const inputPointer = core.allocate_f64(input.length);
   const outputPointer = core.allocate_f64(outputLength);
@@ -40,6 +41,8 @@ async function runRaw(config: typeof VO2_REFERENCE_CONFIG): Promise<number> {
 describe("solver ABI boundaries", () => {
   test("rejects fractional mesh dimensions instead of rounding them", async () => {
     await expect(runRaw({ ...VO2_REFERENCE_CONFIG, timeSteps: 24.5 })).resolves.toBe(3);
+    await expect(runRaw({ ...VO2_REFERENCE_CONFIG, filmCells: 2.5 })).resolves.toBe(3);
+    await expect(runRaw({ ...VO2_REFERENCE_CONFIG, substrateGrading: 8.1 })).resolves.toBe(3);
   });
 
   test("rejects negative convection and sub-absolute ambient temperatures", async () => {
@@ -69,8 +72,9 @@ describe("solver ABI boundaries", () => {
 
   test("rejects unsafe output dimensions at the WASM boundary", async () => {
     const core = await loadCore();
-    expect(core.output_length(1, 1, 1)).toBe(0);
-    expect(core.output_length(1201, 257, 128)).toBe(0);
+    expect(core.output_length(1, 1, 1, 1)).toBe(0);
+    expect(core.output_length(1201, 257, 128, 1)).toBe(0);
+    expect(core.output_length(241, 257, 128, 64)).toBe(0);
   });
 
   test("rejects an empty successful worker response envelope", () => {

@@ -9,6 +9,7 @@ import {
   type ScientificFieldValidationReporter,
 } from "@jorpago2/scientific-ui";
 import type { OptothermalConfig, ValidationIssue } from "../solver/types";
+import { getMeshDiagnostics } from "../solver/validation";
 
 interface ConfigurationPanelProps {
   config: OptothermalConfig;
@@ -70,17 +71,20 @@ const thermalFields: FieldDefinition[] = [
 ];
 
 const numericalFields: FieldDefinition[] = [
-  { key: "timeSteps", label: "Time samples", min: 24, max: 1200 },
-  { key: "radialCells", label: "Radial cells", min: 17, max: 257 },
+  { key: "radialCells", label: "Radial cells", min: 17, max: 257, helperText: "Uniform radial mesh, including the axis and ambient outer boundary." },
+  { key: "filmCells", label: "VO₂ thickness cells", min: 1, max: 64, helperText: "Uniform cells through the film. One cell reproduces the previous thermal approximation." },
   { key: "substrateCells", label: "Substrate depth cells", min: 4, max: 128 },
+  { key: "substrateGrading", label: "Substrate grading", min: 0, max: 8, helperText: "0: uniform. Larger values concentrate cells near the VO₂ interface; the substrate depth stays unchanged." },
+  { key: "timeSteps", label: "Time samples", min: 24, max: 1200, helperText: "Uniform time samples over the simulated window; refine separately from the spatial mesh." },
 ];
 
 function issueFor(field: keyof OptothermalConfig, issues: ValidationIssue[]) {
   return issues.find((issue) => issue.field === field && issue.severity === "error")?.message;
 }
 
-function Fields({ definitions, config, issues, onChange, onFieldValidationChange, fieldRevision }: {
+function Fields({ definitions, config, issues, onChange, onFieldValidationChange, fieldRevision, disabled }: {
   definitions: FieldDefinition[];
+  disabled: boolean;
   config: OptothermalConfig;
   issues: ValidationIssue[];
   onChange: ConfigurationPanelProps["onChange"];
@@ -94,6 +98,7 @@ function Fields({ definitions, config, issues, onChange, onFieldValidationChange
       labelText={definition.label}
       unit={definition.unit}
       value={config[definition.key]}
+      disabled={disabled}
       min={definition.min}
       max={definition.max}
       helperText={definition.helperText}
@@ -106,6 +111,8 @@ function Fields({ definitions, config, issues, onChange, onFieldValidationChange
 }
 
 export function ConfigurationPanel({ config, issues, busy, onChange, onReset, onClose, onFieldValidationChange, fieldRevision, hasInvalidDrafts }: ConfigurationPanelProps) {
+  const mesh = getMeshDiagnostics(config);
+  const format = (value: number) => Number.isFinite(value) ? value.toPrecision(3) : "—";
   const errors = issues.filter((issue) => issue.severity === "error");
   const messages: ValidationMessage[] = issues.map((issue) => ({
     id: issue.id,
@@ -130,19 +137,30 @@ export function ConfigurationPanel({ config, issues, busy, onChange, onReset, on
       )}
     >
       <ScientificParameterSection title="Pulse and beam" description="Gaussian pulse evaluated at the beam waist; no axial sweep is performed." columns={1}>
-        <Fields definitions={beamFields} config={config} issues={issues} onChange={onChange} onFieldValidationChange={onFieldValidationChange} fieldRevision={fieldRevision} />
+        <Fields disabled={busy} definitions={beamFields} config={config} issues={issues} onChange={onChange} onFieldValidationChange={onFieldValidationChange} fieldRevision={fieldRevision} />
       </ScientificParameterSection>
       <ScientificParameterSection title="Geometry" columns={1}>
-        <Fields definitions={geometryFields} config={config} issues={issues} onChange={onChange} onFieldValidationChange={onFieldValidationChange} fieldRevision={fieldRevision} />
+        <Fields disabled={busy} definitions={geometryFields} config={config} issues={issues} onChange={onChange} onFieldValidationChange={onFieldValidationChange} fieldRevision={fieldRevision} />
       </ScientificParameterSection>
       <ScientificParameterSection title="Optical and phase model" description="Thin-film TMM converts n/k into local absorptance A(λ,T); reference values should be replaced by measured ellipsometry." columns={1} collapsible defaultOpen={false}>
-        <Fields definitions={opticalFields} config={config} issues={issues} onChange={onChange} onFieldValidationChange={onFieldValidationChange} fieldRevision={fieldRevision} />
+        <Fields disabled={busy} definitions={opticalFields} config={config} issues={issues} onChange={onChange} onFieldValidationChange={onFieldValidationChange} fieldRevision={fieldRevision} />
       </ScientificParameterSection>
       <ScientificParameterSection title="Thermal properties" description="Homogeneous, isotropic properties; convection applies at the air-side outer boundary." columns={1} collapsible defaultOpen={false}>
-        <Fields definitions={thermalFields} config={config} issues={issues} onChange={onChange} onFieldValidationChange={onFieldValidationChange} fieldRevision={fieldRevision} />
+        <Fields disabled={busy} definitions={thermalFields} config={config} issues={issues} onChange={onChange} onFieldValidationChange={onFieldValidationChange} fieldRevision={fieldRevision} />
       </ScientificParameterSection>
-      <ScientificParameterSection title="Numerical mesh" description="The implicit solver is stable for large steps, but the pulse still requires temporal resolution." columns={1} collapsible defaultOpen={false}>
-        <Fields definitions={numericalFields} config={config} issues={issues} onChange={onChange} onFieldValidationChange={onFieldValidationChange} fieldRevision={fieldRevision} />
+      <ScientificParameterSection title="Numerical mesh" description="Refine the film and interface independently. Finer meshes cost more; passing resolution checks does not establish convergence." columns={1} collapsible defaultOpen={false}>
+        <Fields disabled={busy} definitions={numericalFields} config={config} issues={issues} onChange={onChange} onFieldValidationChange={onFieldValidationChange} fieldRevision={fieldRevision} />
+        <div className="mesh-summary" aria-label="Mesh spacing summary">
+          <p><strong>Current mesh</strong> · {config.radialCells * (config.substrateCells + config.filmCells)} cells / 40,000 maximum</p>
+          <dl>
+            <div><dt>Radial spacing</dt><dd>{format(mesh.radialSpacingUm)} µm</dd></div>
+            <div><dt>VO₂ cell thickness</dt><dd>{format(mesh.filmSpacingNm)} nm</dd></div>
+            <div><dt>Substrate cell at interface</dt><dd>{format(mesh.substrateSpacingUm * 1000)} nm</dd></div>
+            <div><dt>Largest substrate cell</dt><dd>{format(mesh.substrateMaximumSpacingUm)} µm</dd></div>
+            <div><dt>Time step</dt><dd>{format(config.durationNs / (config.timeSteps - 1))} ns</dd></div>
+          </dl>
+          <p>Thermal cells resolve depth. Optical absorption remains uniform through the film, with an effective phase driven by its thickness-averaged temperature.</p>
+        </div>
       </ScientificParameterSection>
       {messages.length > 0 && <ValidationSummary heading="Input review" messages={messages} />}
     </ScientificTaskPanel>

@@ -28,6 +28,9 @@ export interface OptothermalConfig {
   timeSteps: number;
   radialCells: number;
   substrateCells: number;
+  filmCells: number;
+  /** Exponential depth grading: 0 is uniform; positive values refine the interface. */
+  substrateGrading: number;
 }
 
 export interface OptothermalResult {
@@ -39,6 +42,7 @@ export interface OptothermalResult {
   finalSurfaceTemperatureC: number[];
   peakSurfaceTemperatureC: number[];
   depthUm: number[];
+  depthEdgesUm: number[];
   finalTemperatureMapC: number[][];
   peakTemperatureMapC: number[][];
   metrics: {
