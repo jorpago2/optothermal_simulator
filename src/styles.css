@@ -371,6 +371,7 @@ textarea {
   margin: var(--scientific-ui-spacing-02) 0 0;
   font-family: var(--scientific-ui-font-mono, "IBM Plex Mono", monospace);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .optothermal-coupling p {
@@ -413,6 +414,20 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
+.optothermal-results .scientific-outcome-summary__metrics { container-type: inline-size; }
+.optothermal-results .scientific-metric dd { flex-wrap: nowrap; white-space: nowrap; }
+.optothermal-results .scientific-metric__value,
+.optothermal-results .scientific-metric__unit {
+  flex-shrink: 0;
+  overflow-wrap: normal;
+  white-space: nowrap;
+  word-break: normal;
+}
+
+@container (max-width: 20rem) {
+  .optothermal-results .scientific-metric-grid[data-count="4"] .scientific-metric { grid-column: span 4; }
+}
+
 @media (max-width: 65.99rem) {
   /* Configuration is a focused task view at tablet and mobile widths. */
   .optothermal-app[data-panel-open] > main > :last-child {
@@ -433,6 +448,26 @@ textarea {
 
   .optothermal-coupling dl {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .optothermal-results .scientific-results-layout__header,
+  .optothermal-results .scientific-outcome-summary__metrics,
+  .optothermal-results .scientific-outcome-summary__grid {
+    padding-block: var(--scientific-ui-spacing-04);
+  }
+
+  .optothermal-results .scientific-metric {
+    min-block-size: 4rem;
+    padding: var(--scientific-ui-spacing-03) var(--scientific-ui-spacing-04);
+  }
+
+  .optothermal-results .scientific-metric__value {
+    font-size: 1.125rem;
+    line-height: 1.375rem;
+  }
+
+  .optothermal-results .scientific-outcome-summary__summary {
+    margin-block-end: 0;
   }
 
   .experiment-diagram {

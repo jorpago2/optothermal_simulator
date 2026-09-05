@@ -13,11 +13,13 @@ import {
   ExportReceipt,
   ResultSwitcher,
   ScientificAppShell,
+  ScientificAutosaveStatus,
   ScientificEmptyState,
   ScientificHeader,
   ScientificModelScope,
   ScientificOutcomeSummary,
   ScientificPreflightSummary,
+  ScientificRecoveryNotice,
   ScientificReproducibilityManifest,
   ScientificResultsLayout,
   ScientificResultsToolbar,
@@ -26,6 +28,7 @@ import {
   ScientificStageHeader,
   ScientificToolRail,
   ScientificValidationSummary,
+  useScientificAutosave,
   useScientificFormValidity,
   useScientificResultTransition,
   type ScientificActionDescriptor,
@@ -38,7 +41,7 @@ import { ExperimentOverview } from "./components/ExperimentOverview";
 import { VO2_REFERENCE_CONFIG } from "./solver/defaults";
 import { cancelActiveSimulation, runSimulation } from "./solver/workerClient";
 import type { OptothermalConfig, OptothermalResult } from "./solver/types";
-import { getMeshDiagnostics, validateConfig, validateResult } from "./solver/validation";
+import { getMeshDiagnostics, isOptothermalConfig, validateConfig, validateResult } from "./solver/validation";
 
 type AppView = "configure" | "results" | "validation";
 type MapView = "peak" | "final";
@@ -104,6 +107,28 @@ export function App() {
     resetValidity,
     revision: fieldRevision,
   } = useScientificFormValidity();
+  const restoreConfiguration = useCallback((saved: OptothermalConfig) => {
+    runRequestRef.current += 1;
+    cancelActiveSimulation();
+    resetValidity();
+    setConfig({ ...saved });
+    setLastRunConfig(undefined);
+    setResult(undefined);
+    setBusy(false);
+    setRunLifecycle("idle");
+    setError("");
+    setRuntimeMs(undefined);
+    setExported(false);
+    setActiveView("configure");
+    setConfigurationOpen(true);
+  }, [resetValidity]);
+  const autosave = useScientificAutosave({
+    storageKey: "optothermal-simulator:session",
+    value: config,
+    schemaVersion: 1,
+    validate: isOptothermalConfig,
+    onRestore: restoreConfiguration,
+  });
   const issues = useMemo(() => validateConfig(config), [config]);
   const hasErrors = issues.some((issue) => issue.severity === "error");
   const runBlocked = hasErrors || hasInvalidFields;
@@ -276,6 +301,15 @@ export function App() {
     <ScientificAppShell
       className="optothermal-app"
       panelOpen={panelOpen}
+      recovery={autosave.recovery && (
+        <ScientificRecoveryNotice
+          savedAt={autosave.recovery.savedAt}
+          onRestore={autosave.restore}
+          onDiscard={autosave.discard}
+          title="Previous optothermal session available"
+          description="A validated local configuration was saved during an earlier visit. Restore it to continue, or discard it and use the VO₂ reference preset."
+        />
+      )}
       header={(
         <ScientificHeader
           skipLink={<SkipToContent href="#optothermal-workspace">Skip to simulation workspace</SkipToContent>}
@@ -328,7 +362,7 @@ export function App() {
           />
         </div>
       )}
-      statusBar={<ScientificStatusBar status={status} metadata={[`${config.radialCells} × ${config.substrateCells + 1} r–z cells · ${config.timeSteps} time samples · ${result ? result.engine : "Rust/WASM"}`]} />}
+      statusBar={<ScientificStatusBar status={status} metadata={<><ScientificAutosaveStatus status={autosave.status} savedAt={autosave.lastSavedAt} /><span>{`${config.radialCells} × ${config.substrateCells + 1} r–z cells · ${config.timeSteps} time samples · ${result ? result.engine : "Rust/WASM"}`}</span></>} />}
     >
       <div ref={stageRef} id="optothermal-workspace" className="optothermal-stage" tabIndex={-1}>
         <h1 className="optothermal-visually-hidden">Optothermal Simulator</h1>
@@ -343,6 +377,7 @@ export function App() {
               />
             ) : (
               <ScientificResultsLayout
+                className="optothermal-results"
                 title="Fixed-position response"
                 description="One Gaussian-beam position at z = 0; no axial sweep or detector propagation."
                 status={resultStatus}
@@ -371,8 +406,8 @@ export function App() {
                     headingLevel={3}
                     status={resultStatus}
                     summary={result.metrics.maximumMetallicFraction > 0.5
-                      ? `The reference model predicts a substantial thermally driven metallic fraction at the beam centre. Optical coupling starts from A₀ = ${result.metrics.baselineAbsorptance.toPrecision(4)} and deposits ${result.metrics.absorbedEnergyJ.toPrecision(4)} J in the simulated domain.`
-                      : `The reference model remains predominantly on the insulating branch during this pulse. Optical coupling starts from A₀ = ${result.metrics.baselineAbsorptance.toPrecision(4)} and deposits ${result.metrics.absorbedEnergyJ.toPrecision(4)} J in the simulated domain.`}
+                      ? "The beam centre enters the metallic branch during this pulse."
+                      : "The beam centre remains predominantly insulating during this pulse."}
                     metrics={[
                       { id: "temperature", label: "Peak center temperature", value: result.metrics.maximumTemperatureC, unit: "°C", format: { significantDigits: 5 } },
                       { id: "phase", label: "Maximum metallic fraction", value: result.metrics.maximumMetallicFraction, format: { significantDigits: 4 } },
@@ -380,16 +415,6 @@ export function App() {
                       { id: "runtime", label: "Browser runtime", value: runtimeMs ? runtimeMs / 1000 : 0, unit: "s", format: { significantDigits: 3 } },
                     ]}
                   />
-                  <section className="optothermal-coupling" aria-labelledby="optothermal-coupling-title">
-                    <h4 id="optothermal-coupling-title">Optical → thermal coupling</h4>
-                    <dl>
-                      <div><dt>Baseline reflectance R₀</dt><dd>{result.metrics.baselineReflectance.toPrecision(5)}</dd></div>
-                      <div><dt>Baseline transmittance T₀</dt><dd>{result.metrics.baselineTransmittance.toPrecision(5)}</dd></div>
-                      <div><dt>Baseline absorptance A₀</dt><dd>{result.metrics.baselineAbsorptance.toPrecision(5)}</dd></div>
-                      <div><dt>Stored / absorbed energy</dt><dd>{(100 * result.metrics.storedToAbsorbedRatio).toFixed(2)}%</dd></div>
-                    </dl>
-                    <p>R/T/A are the thin-film optical balance at the reference state; the thermal solver uses the local absorptance as its heat source. They are not detector-plane observables.</p>
-                  </section>
                 </section>
                 <Suspense fallback={<p className="plot-loading" role="status">Loading scientific plots…</p>}>
                   <Grid fullWidth narrow className="plot-grid">
@@ -406,6 +431,16 @@ export function App() {
                     </Column>
                   </Grid>
                 </Suspense>
+                <section className="optothermal-coupling" aria-labelledby="optothermal-coupling-title">
+                  <h4 id="optothermal-coupling-title">Optical → thermal coupling</h4>
+                  <dl>
+                    <div><dt>Baseline reflectance R₀</dt><dd>{result.metrics.baselineReflectance.toPrecision(5)}</dd></div>
+                    <div><dt>Baseline transmittance T₀</dt><dd>{result.metrics.baselineTransmittance.toPrecision(5)}</dd></div>
+                    <div><dt>Baseline absorptance A₀</dt><dd>{result.metrics.baselineAbsorptance.toPrecision(5)}</dd></div>
+                    <div><dt>Stored / absorbed energy</dt><dd>{(100 * result.metrics.storedToAbsorbedRatio).toFixed(2)}%</dd></div>
+                  </dl>
+                  <p>R/T/A are the thin-film optical balance at the reference state; the thermal solver uses the local absorptance as its heat source. They are not detector-plane observables.</p>
+                </section>
               </ScientificResultsLayout>
             )}
         </section>

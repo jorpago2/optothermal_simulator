@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { VO2_REFERENCE_CONFIG } from "./defaults";
 import type { OptothermalResult } from "./types";
-import { assertValidResult, validateConfig, validateResult } from "./validation";
+import { assertValidResult, isOptothermalConfig, validateConfig, validateResult } from "./validation";
 
 function validResult(): OptothermalResult {
   return {
@@ -49,6 +49,13 @@ function validResult(): OptothermalResult {
 describe("optothermal configuration validation", () => {
   it("accepts the migrated VO2 reference preset", () => {
     expect(validateConfig(VO2_REFERENCE_CONFIG).filter((issue) => issue.severity === "error")).toEqual([]);
+    expect(isOptothermalConfig(VO2_REFERENCE_CONFIG)).toBe(true);
+  });
+
+  it("rejects partial or non-finite saved sessions", () => {
+    const { wavelengthUm: _wavelengthUm, ...partial } = VO2_REFERENCE_CONFIG;
+    expect(isOptothermalConfig(partial)).toBe(false);
+    expect(isOptothermalConfig({ ...VO2_REFERENCE_CONFIG, waistUm: Number.NaN })).toBe(false);
   });
 
   it("rejects a time window that truncates the pulse", () => {

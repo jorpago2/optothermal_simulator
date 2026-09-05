@@ -22,6 +22,25 @@ const finitePositiveFields: Array<keyof OptothermalConfig> = [
 
 const finiteNonNegativeFields: Array<keyof OptothermalConfig> = ["convectionWM2K"];
 
+const optothermalConfigFields: Array<keyof OptothermalConfig> = [
+  "wavelengthUm", "waistUm", "peakIntensityGwCm2", "pulseFwhmNs", "durationNs", "ambientC",
+  "filmThicknessNm", "substrateDepthUm", "radiusUm", "substrateIndex", "airIndex", "insulatingN", "insulatingK",
+  "metallicN", "metallicK", "transitionHeatingC", "transitionCoolingC", "transitionWidthC", "phaseRelaxationNs",
+  "filmDensityKgM3", "filmHeatCapacityJKgK", "filmConductivityWMK", "substrateDensityKgM3", "substrateHeatCapacityJKgK",
+  "substrateConductivityWMK", "convectionWM2K", "timeSteps", "radialCells", "substrateCells",
+];
+
+export function isOptothermalConfig(value: unknown): value is OptothermalConfig {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<OptothermalConfig>;
+  if (!optothermalConfigFields.every((field) => Object.prototype.hasOwnProperty.call(candidate, field) && Number.isFinite(candidate[field]))) return false;
+  try {
+    return !validateConfig(candidate as OptothermalConfig).some((issue) => issue.severity === "error");
+  } catch {
+    return false;
+  }
+}
+
 export function getMeshDiagnostics(config: OptothermalConfig): MeshDiagnostics {
   const radialSpacingUm = config.radiusUm / Math.max(1, config.radialCells - 1);
   const pointsPerWaist = config.waistUm / radialSpacingUm;

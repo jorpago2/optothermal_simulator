@@ -1,3 +1,4 @@
+import DevelopmentNotice from "./DevelopmentNotice";
 import "./carbon.scss";
 import "./styles.css";
 import "@jorpago2/scientific-ui/styles.css";
@@ -13,7 +14,7 @@ if (!root) throw new Error("The application root element was not found.");
 createRoot(root).render(
   <StrictMode>
     <ScientificUiProvider themeStorageKey="optothermal-simulator-theme">
-      <App />
+      <App /><DevelopmentNotice />
     </ScientificUiProvider>
   </StrictMode>,
 );
